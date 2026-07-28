@@ -20,8 +20,12 @@ export const BASE_DAG = Object.freeze({
       id: "discover",
       label: "Discover facilities",
       after: [],
+      // Bounded on purpose. The unbounded phrasing ("find EVERY licensed
+      // facility, prefer state registries") invited a page-open per facility and
+      // pushed this node past 8 minutes. Later nodes enrich; this one only has
+      // to produce the candidate set, so a search-results listing is enough.
       instruction:
-        "Find every licensed assisted living facility whose street address is in the target ZIP code. For each, return name and full street address. Prefer state licensure registries and operator sites over aggregators.",
+        "Find assisted living facilities in the target ZIP code. BUDGET: at most 3 web searches, then stop searching. Return up to 10 facilities with name and street address. Do NOT open a page per facility — search-result listings are sufficient here, later nodes enrich each one. Call record_facilities EXACTLY ONCE with everything you found. Set each field's confidence honestly: search-snippet data is roughly 0.6, not 0.9.",
       enabled: true,
       origin: "base",
     },
@@ -30,7 +34,7 @@ export const BASE_DAG = Object.freeze({
       label: "Management company",
       after: ["discover"],
       instruction:
-        "For each facility, identify the management/operator company (the entity that runs it day to day, not the real-estate owner).",
+        "For each facility, identify the management/operator company (the entity that runs it day to day, not the real-estate owner). BUDGET: at most 2 web searches total across ALL facilities — batch them, do not search per facility. Call record_facilities exactly once. Leave management null with a reason rather than guessing.",
       enabled: true,
       origin: "base",
     },
@@ -39,7 +43,7 @@ export const BASE_DAG = Object.freeze({
       label: "ACO partnerships",
       after: ["discover"],
       instruction:
-        "For each facility, identify any Accountable Care Organizations (ACOs), Medicare Advantage plans, or value-based care networks it partners with.",
+        "For each facility, identify any Accountable Care Organizations (ACOs), Medicare Advantage plans, or value-based care networks it partners with. BUDGET: at most 2 web searches total across ALL facilities. ACO affiliation is rarely published, so an empty list with low confidence is the CORRECT answer far more often than a guess — say so rather than inventing a partner. Call record_facilities exactly once.",
       enabled: true,
       origin: "base",
     },
@@ -48,7 +52,7 @@ export const BASE_DAG = Object.freeze({
       label: "Beds, fees, service mix",
       after: ["discover"],
       instruction:
-        "For each facility, determine licensed bed count, average monthly private-pay fee in USD, and which service lines it offers from: IL, AL, MemoryCare, HomeHealth, SNF, Respite.",
+        "For each facility, determine licensed bed count, average monthly private-pay fee in USD, and which service lines it offers from: IL, AL, MemoryCare, HomeHealth, SNF, Respite. BUDGET: at most 3 web searches total across ALL facilities — batch them. beds and avgMonthlyFee MUST be a number or null, never a string like '60 units'. Call record_facilities exactly once.",
       enabled: true,
       origin: "base",
     },

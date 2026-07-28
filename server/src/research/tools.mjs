@@ -182,13 +182,29 @@ export const recordFacilitiesTool = tool(
   },
 );
 
-export const researchMcpServer = createSdkMcpServer({
-  name: "research",
-  version: "0.1.0",
-  instructions:
-    "Assisted-living facility research tools. Provenance is mandatory on every recorded value.",
-  tools: [zipCentroidTool, haversineTool, recordFacilitiesTool],
-});
+/**
+ * Build a FRESH MCP server instance.
+ *
+ * This must be per-query, not a module singleton. The three enrichment nodes run
+ * as concurrent `query()` calls, and handing all three the same server instance
+ * made two of them fail to connect — they reported "record_facilities is
+ * unavailable" and silently wrote nothing, so management/fees/services came back
+ * empty while whichever node won the race (aco) filled all 10 rows. The failure
+ * is easy to misread as the model refusing to answer rather than a transport
+ * that was never there.
+ */
+export function makeResearchMcpServer() {
+  return createSdkMcpServer({
+    name: "research",
+    version: "0.1.0",
+    instructions:
+      "Assisted-living facility research tools. Provenance is mandatory on every recorded value.",
+    tools: [zipCentroidTool, haversineTool, recordFacilitiesTool],
+  });
+}
+
+/** Back-compat singleton. Safe only for a single non-concurrent query. */
+export const researchMcpServer = makeResearchMcpServer();
 
 /** Fully-qualified tool names as the SDK exposes them to `allowedTools`. */
 export const RESEARCH_TOOL_NAMES = [
