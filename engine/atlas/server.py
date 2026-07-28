@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi import Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -102,6 +103,73 @@ def api_run(run_id: str) -> dict:
     if not r:
         raise HTTPException(404, "unknown run")
     return r
+
+
+CSV_COLUMNS = [
+    "name", "address", "city", "state", "zip", "distance_mi", "beds", "bed_basis",
+    "management", "services", "acos", "avg_monthly_fee", "facility_kind",
+    "cms_ccn", "license_id", "cms_overall_rating", "score",
+]
+
+
+def _cell(v: Any) -> tuple[str, str]:
+    """A Sourced cell -> (value, provenance). Unknown keeps its reason rather than
+    flattening to an empty string -- the reason is the point."""
+    if not isinstance(v, dict) or "value" not in v:
+        return ("" if v is None else str(v), "")
+    val = v.get("value")
+    conf = v.get("confidence")
+    conf = getattr(conf, "value", conf) or ""
+    prov = f"{conf}:{v.get('source') or ''}".strip(":")
+    if val is None:
+        return ("", f"unknown — {v.get('note') or 'not found'}")
+    if isinstance(val, list):
+        val = "; ".join(x.get("name", str(x)) if isinstance(x, dict) else str(x) for x in val)
+    if v.get("human_verified"):
+        prov += " (human-verified)"
+    return (str(val), prov)
+
+
+@app.get("/api/run/{run_id}/csv")
+def api_run_csv(run_id: str) -> Any:
+    """The table as CSV, one provenance column per data column.
+
+    Provenance travels with the data on purpose. A spreadsheet that has been stripped of
+    where each number came from is exactly how an inferred cell gets quoted as a fact.
+    """
+    import csv
+    import io
+
+    r = store.get_run(run_id)
+    if not r:
+        raise HTTPException(404, "unknown run")
+    payload = r.get("payload")
+    if isinstance(payload, str):
+        import json as _json
+
+        payload = _json.loads(payload)
+    facilities = (payload or {}).get("facilities") or []
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    header: list[str] = []
+    for c in CSV_COLUMNS:
+        header.append(c)
+        header.append(f"{c}__source")
+    w.writerow(header)
+    for f in facilities:
+        row: list[str] = []
+        for c in CSV_COLUMNS:
+            val, prov = _cell(f.get(c))
+            row.extend([val, prov])
+        w.writerow(row)
+
+    zipcode = (payload or {}).get("zip") or "run"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="alf-atlas-{zipcode}-{run_id}.csv"'},
+    )
 
 
 @app.get("/api/policy")

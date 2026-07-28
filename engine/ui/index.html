@@ -86,6 +86,18 @@
   .muted { color:var(--ink-3); font-size:12px; }
   details summary { cursor:pointer; font-size:12px; color:var(--ink-3); }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--ink-2); margin-top:9px; }
+  .dl { color:var(--accent, #2b6cb0); text-decoration:none; border-bottom:1px solid currentColor; }
+  .dl:hover { opacity:.75; }
+  .dag { margin:14px 0 4px; }
+  .dag > summary { cursor:pointer; font-size:12px; color:var(--ink-2); font-family:var(--mono); }
+  .dwrap { display:flex; flex-direction:column; align-items:center; gap:2px; margin:10px 0 4px; }
+  .drow { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .dnode { font-family:var(--mono); font-size:11px; padding:4px 10px; border-radius:5px;
+           border:1px solid var(--line, #d8d8d8); white-space:nowrap; cursor:help; }
+  .dnode.ran { background:var(--ok-bg, #e8f3ea); border-color:var(--ok-line, #7fb08c); color:var(--ink-1, #1c1c1c); }
+  .dnode.skipped { opacity:.45; border-style:dashed; }
+  .darrow { color:var(--ink-2); font-size:11px; line-height:1; }
+  .dhint { font-size:10.5px; margin:2px 0 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -159,7 +171,9 @@ function renderSummary(r) {
       <span><b>${e.geocoded_exact ?? 0}</b> exact geocodes<span class="muted"> / ${e.centroid_fallback ?? 0} centroid</span></span>
       <span><b>${j.facilities_with_proposals ?? 0}</b> ACO proposals<span class="muted"> (${j.exact_legal_entity_matches ?? 0} exact-legal)</span></span>
       <span><b>${cov}%</b> cell coverage</span>
+      <span><a class="dl" href="/api/run/${encodeURIComponent(r.run_id)}/csv">⤓ Download CSV</a></span>
     </div>
+    ${renderDag(r)}
     <div class="legend">
       <span class="c-registry">■ registry — a government file said so</span>
       <span class="c-derived">■ derived — computed by inspectable code</span>
@@ -167,6 +181,38 @@ function renderSummary(r) {
       <span class="c-unknown">■ unknown — with a stated reason</span>
       <span class="c-human">■ human — a reviewer established it</span>
     </div></div>`;
+}
+// The graph, drawn from the run's own trace rather than a hardcoded picture -- a node
+// that did not execute cannot light up, which is the point of showing it at all.
+const DAG_ROWS = [
+  [{id:"resolve_zip", label:"Resolve ZIP"}],
+  [{id:"discover", label:"Discover"}],
+  [{id:"enrich_registry", label:"Registry"}, {id:"join_aco", label:"Join ACO"}, {id:"enrich_agentic", label:"Agentic"}],
+  [{id:"apply_overrides", label:"Overrides"}],
+  [{id:"review", label:"Review · HITL"}],
+  [{id:"apply_verdicts", label:"Apply verdicts"}],
+  [{id:"finalize", label:"Score & rank"}],
+];
+function renderDag(r) {
+  const t = Object.fromEntries((r.trace || []).map(x => [x.node, x]));
+  const rows = DAG_ROWS.map((row, i) => {
+    const cells = row.map(n => {
+      const hit = t[n.id];
+      const cls = hit ? "dnode ran" : "dnode skipped";
+      const detail = hit
+        ? Object.entries(hit).filter(([k]) => k !== "node")
+            .map(([k, v]) => `${k}: ${v}`).join("\n") || "ran"
+        : "did not run on this pass";
+      return `<span class="${cls}" title="${esc(detail)}">${esc(n.label)}</span>`;
+    }).join("");
+    const arrow = i < DAG_ROWS.length - 1 ? `<span class="darrow">↓</span>` : "";
+    return `<div class="drow">${cells}</div>${arrow}`;
+  }).join("");
+  return `<details class="dag" open><summary>Pipeline graph — ${
+    (r.trace || []).length} nodes executed${r.agentic_enabled ? "" : " · agentic off"}</summary>
+    <div class="dwrap">${rows}</div>
+    <p class="muted dhint">Hover a node for what it actually did. Grey nodes did not run.</p>
+  </details>`;
 }
 const coverage = f => ["distance_mi","beds","avg_monthly_fee","management","services","acos"]
   .filter(k => f[k] && f[k].value !== null && f[k].value !== undefined).length / 6;
