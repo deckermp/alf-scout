@@ -37,6 +37,92 @@ def _loads(v: Any) -> Any:
     return v
 
 
+# Fields whose values are RETRIEVED from a named source. A correction to one of these
+# means "the source that produced this was wrong", which is a claim about source ordering
+# and therefore compiles to a `source_pref` lesson.
+#
+# `avg_monthly_fee` is deliberately absent. It is MODELLED, never retrieved -- no public
+# registry publishes per-facility pricing -- so there is no source to demote. Emitting a
+# source_pref lesson for it would be inert while looking like learning, which is worse than
+# declining out loud. Teaching the pipeline about fees needs a different mechanism (an
+# interval with a stated method), not a preference over sources that do not exist.
+RETRIEVED_FIELDS = ("beds", "management", "services")
+
+# One correction to one facility is an override, not a lesson. Two corrections sharing a
+# cause is a lesson. Same bar the agent path is held to in INDUCE_SYSTEM rule 1.
+MIN_CORRECTIONS_TO_GENERALISE = 2
+
+
+def _source_of(run_id: str, facility_id: str, field: str) -> str | None:
+    """Which source produced the value the reviewer corrected.
+
+    Read from the stored run rather than trusting the verdict to carry it -- the UI sends
+    the value it displayed, not always the provenance behind it.
+    """
+    run = store.get_run(run_id)
+    if not run:
+        return None
+    payload = _loads(run.get("payload")) or {}
+    for f in payload.get("facilities") or []:
+        if f.get("id") == facility_id:
+            cell = f.get(field)
+            return cell.get("source") if isinstance(cell, dict) else None
+    return None
+
+
+def _induce_source_pref(rows: list[dict], policy) -> tuple[list[str], list[int]]:
+    """Corrections to retrieved fields -> a demotion of the source that was wrong.
+
+    Returns (lesson_ids, consumed_verdict_ids). Emits nothing when demoting would not
+    change the compiled order -- an inert lesson is the failure mode this guards against.
+    """
+    created: list[str] = []
+    consumed: list[int] = []
+
+    # (field, losing source) -> the verdicts that blamed it
+    blamed: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        if r["field"] not in RETRIEVED_FIELDS or r["action"] != "correct":
+            continue
+        src = _source_of(r["run_id"], r["facility_id"], r["field"])
+        if not src:
+            continue  # no provenance to blame; leave the verdict unconsumed for the agent path
+        blamed.setdefault((r["field"], src), []).append(r)
+
+    for (field, losing), hits in sorted(blamed.items()):
+        if len(hits) < MIN_CORRECTIONS_TO_GENERALISE:
+            continue  # one correction is an override, and the override already applied
+
+        order = list(policy.source_pref.get(field) or [])
+        # Nothing to reorder: the source is unknown to the policy, is the only one, or is
+        # already last. Saying so beats writing a lesson that compiles to the same policy.
+        if losing not in order or len(order) < 2 or order[-1] == losing:
+            continue
+
+        new_order = [s for s in order if s != losing] + [losing]
+        created.append(
+            store.add_lesson(
+                kind="source_pref",
+                node="enrich_registry",
+                payload={"field": field, "order": new_order},
+                rationale=(
+                    f"Reviewer corrected `{field}` on {len(hits)} facilities, and every one of those "
+                    f"values came from {losing}. Demoting {losing} to last for this field "
+                    f"({' > '.join(order)} -> {' > '.join(new_order)}) so the next run prefers a source "
+                    "the reviewer has not had to correct. This changes precedence only -- "
+                    f"{losing} is still consulted when nothing above it has a value."
+                ),
+                evidence=[
+                    {"facility_id": h["facility_id"], "before": _loads(h.get("before")), "after": _loads(h.get("after"))}
+                    for h in hits
+                ],
+            )
+        )
+        consumed.extend(h["id"] for h in hits)
+
+    return created, consumed
+
+
 def induce_deterministic(verdicts: list[dict] | None = None) -> list[str]:
     """Arithmetic induction. Reproducible, explainable, no model in the loop."""
     rows = verdicts if verdicts is not None else store.unconsumed_verdicts()
@@ -107,6 +193,12 @@ def induce_deterministic(verdicts: list[dict] | None = None) -> list[str]:
                         evidence=rejected_lbns,
                     )
                 )
+
+    # Retrieved-field corrections -> source_pref. Separate pass: it reads a different
+    # slice of the verdicts and must not disturb the ACO arithmetic above.
+    sp_created, sp_consumed = _induce_source_pref(rows, policy)
+    created.extend(sp_created)
+    consumed.extend(sp_consumed)
 
     store.mark_consumed(consumed)
     return created
