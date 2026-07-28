@@ -217,12 +217,26 @@ Lesson kinds and their exact payload shapes:
   blocklist   {"names": ["<normalized affiliate name>", ...]}
   rule        {"id":"<slug>","when":{"field":"facility_type","op":"contains","value":"X"},
                "add":["MC"],"basis":"<why>","confidence":"derived"}
-  source_pref {"field":"beds","order":["S1","S2"]}
+  source_pref {"field":"beds","order":["S1","S2"]} | {"field":"beds","order":[...],"min_capacity":20}
   prompt      {"text":"<one constraint sentence appended to the enrichment agent's system prompt>"}
+  topology    {"ops":[{"op":"disable_node","node":"enrich_agentic"}]}
+              {"ops":[{"op":"enable_node","node":"enrich_agentic"}]}
+              Restructures the graph instead of retuning it. Use ONLY when the reviewer is
+              asking for a stage to stop or start running at all -- "skip the agentic pass",
+              "stop guessing fees". Never use it to fix a value.
+
+You may be given `reviewer_feedback`: free text about the run as a whole rather than about
+one cell. Treat it as first-class evidence. It is the only channel that can express things
+cell verdicts cannot -- scope ("I don't care about six-bed board-and-care homes" ->
+source_pref with min_capacity), cost and trust ("the agentic pass is slow and I don't
+believe its fees" -> topology disable_node), or a standing constraint for the enrichment
+agent ("never cite an aggregator" -> prompt).
 
 Hard rules:
 1. Propose a lesson only where the evidence supports GENERALISING. One correction to one
    facility is an override, not a lesson. Two or more corrections sharing a cause is a lesson.
+   Free-text feedback is exempt from the two-correction bar -- a reviewer stating a general
+   preference has already done the generalising, and that is what makes it worth a lesson.
 2. Never propose a threshold that would discard a match the reviewer CONFIRMED. Check the
    confirmed scores you are given.
 3. Prefer the narrowest lesson that covers the evidence. A blocklist of two names beats a
@@ -252,10 +266,26 @@ def _tool(collected: list[dict]):
     return sdk.create_sdk_mcp_server(name="induct", version="0.1.0", tools=[propose_lesson])
 
 
-async def induce_with_agent(verdicts: list[dict] | None = None, model: str = "claude-sonnet-5") -> dict[str, Any]:
+async def induce_with_agent(
+    verdicts: list[dict] | None = None,
+    model: str = "claude-sonnet-5",
+    feedback: str = "",
+) -> dict[str, Any]:
+    """Verdicts and/or free-text feedback -> proposed lessons.
+
+    `feedback` is the reviewer talking about the run as a whole rather than about one cell:
+    "you're including six-bed board-and-care homes I don't care about", "skip the agentic
+    pass, it's slow and I don't trust the fees". Cell verdicts cannot express either, and
+    both compile cleanly to lessons -- the first to `source_pref` with a min_capacity, the
+    second to `topology`.
+
+    Either input alone is enough. Nothing here ships: every lesson lands as `proposed` and
+    only the gate promotes.
+    """
     rows = verdicts if verdicts is not None else store.unconsumed_verdicts()
-    if not rows:
-        return {"created": [], "note": "no unconsumed verdicts", "cost_usd": 0.0}
+    feedback = (feedback or "").strip()
+    if not rows and not feedback:
+        return {"created": [], "note": "no unconsumed verdicts and no feedback", "cost_usd": 0.0}
 
     policy = active_policy()
     brief = {
@@ -266,7 +296,9 @@ async def induce_with_agent(verdicts: list[dict] | None = None, model: str = "cl
             "aco_aliases": policy.aco_aliases,
             "aco_blocklist": policy.aco_blocklist,
             "service_rule_ids": [r.get("id") for r in policy.service_rules],
+            "disabled_nodes": policy.disabled_nodes,
         },
+        "reviewer_feedback": feedback or None,
         "verdicts": [
             {
                 "facility_id": r["facility_id"],
@@ -293,7 +325,10 @@ async def induce_with_agent(verdicts: list[dict] | None = None, model: str = "cl
     cost, transcript = 0.0, []
     try:
         async for msg in sdk.query(
-            prompt=f"Reviewer corrections and current policy:\n\n{json.dumps(brief, indent=2, default=str)}",
+            prompt=(
+                "Reviewer corrections, free-text feedback, and current policy:\n\n"
+                f"{json.dumps(brief, indent=2, default=str)}"
+            ),
             options=options,
         ):
             if isinstance(msg, sdk.AssistantMessage):

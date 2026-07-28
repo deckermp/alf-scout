@@ -204,6 +204,35 @@ def api_induce(use_agent: bool = False) -> dict:
     return {"created": created, "lessons": [x for x in store.lessons() if x["lesson_id"] in created]}
 
 
+class FeedbackReq(BaseModel):
+    feedback: str = Field(min_length=1, max_length=4000)
+    run_id: str | None = None
+
+
+@app.post("/api/feedback")
+def api_feedback(req: FeedbackReq) -> dict:
+    """Free-text HITL: the reviewer talks about the run, not about one cell.
+
+    Cell verdicts cannot express scope ("stop including six-bed board-and-care homes") or
+    trust ("skip the agentic pass, I don't believe its fees"). Both are standing preferences
+    that should shape every future run, and both compile to lessons -- so this routes to the
+    agent inducer and lands `proposed` lessons like any other path. The gate still decides.
+    """
+    if not agentic_available():
+        raise HTTPException(
+            400,
+            "free-text feedback needs the agent inducer: set ANTHROPIC_API_KEY, or use "
+            "per-cell verdicts, which induce deterministically with no key.",
+        )
+    out = induce.induce_with_agent_sync(feedback=req.feedback, verdicts=None)
+    created = out.get("created") or []
+    return {
+        **out,
+        "lessons": [x for x in store.lessons() if x["lesson_id"] in created],
+        "next": "POST /api/gate to evaluate them; nothing is active until the gate promotes it.",
+    }
+
+
 @app.post("/api/gate")
 def api_gate() -> dict:
     """Run the eval gate. Note there is no `force` parameter, by design."""

@@ -98,6 +98,11 @@
   .dnode.skipped { opacity:.45; border-style:dashed; }
   .darrow { color:var(--ink-2); font-size:11px; line-height:1; }
   .dhint { font-size:10.5px; margin:2px 0 0; text-align:center; }
+  .fbbox { margin-bottom:12px; padding:10px 12px; border:1px solid var(--line, #d8d8d8); border-radius:6px; }
+  .fbbox label { display:block; font-size:12px; color:var(--ink-2); margin-bottom:6px; }
+  .fbbox textarea { width:100%; box-sizing:border-box; font:inherit; font-size:12.5px; padding:7px 9px;
+                    border:1px solid var(--line, #d8d8d8); border-radius:5px; resize:vertical; margin-bottom:7px; }
+  .fbbox .muted { font-size:11px; }
 </style>
 </head>
 <body>
@@ -123,6 +128,14 @@
 
   <div class="panel" id="metaPanel">
     <h2>Meta-learning — corrections become policy</h2>
+    <div class="fbbox">
+      <label for="feedback">Tell the pipeline what to do differently — this shapes <em>every future run</em>, not just this one.</label>
+      <textarea id="feedback" rows="2" placeholder="e.g. Stop including six-bed board-and-care homes, I only care about 20+ bed communities. Skip the agentic pass — it's slow and I don't trust its fee numbers."></textarea>
+      <div class="row">
+        <button id="teach">Teach the pipeline</button>
+        <span class="muted">Free text can change the graph itself (enable/disable nodes), not just the parameters. Needs <code>ANTHROPIC_API_KEY</code>; per-cell verdicts do not.</span>
+      </div>
+    </div>
     <div class="row" style="margin-bottom:10px">
       <button id="induce">1 · Induce lessons from corrections</button>
       <button id="gate">2 · Run eval gate</button>
@@ -342,6 +355,20 @@ $("#induce").onclick = async () => {
   $("#metaStatus").textContent = "inducing…";
   try { const d = await api("/api/induce", {method:"POST"});
     $("#metaStatus").textContent = d.created.length ? `${d.created.length} lesson(s) proposed` : "nothing generalised — no lesson proposed";
+    loadMeta();
+  } catch (e) { $("#metaStatus").textContent = "error: " + e.message; }
+};
+$("#teach").onclick = async () => {
+  const text = $("#feedback").value.trim();
+  if (!text) { $("#metaStatus").textContent = "type what you want changed first"; return; }
+  $("#metaStatus").textContent = "reading your feedback and proposing lessons…";
+  try {
+    const d = await api("/api/feedback", {method:"POST", body: JSON.stringify({feedback: text, run_id: RUN ? RUN.run_id : null})});
+    const n = (d.created || []).length;
+    $("#metaStatus").textContent = n
+      ? `${n} lesson(s) proposed — run the eval gate to see if they hold up`
+      : "nothing generalised from that — no lesson proposed";
+    if (n) $("#feedback").value = "";
     loadMeta();
   } catch (e) { $("#metaStatus").textContent = "error: " + e.message; }
 };

@@ -61,9 +61,20 @@ def compile_policy(lesson_rows: list[dict] | None = None, base: Policy | None = 
                 rules = [r for r in rules if r.get("id") != payload.get("id")]
                 rules.append(payload)
             elif kind == "source_pref":
-                prefs[payload["field"]] = list(payload["order"])
+                # `order` and `min_capacity` apply INDEPENDENTLY. Requiring both meant a
+                # scope-only lesson ({"field":"beds","min_capacity":20}) raised KeyError on
+                # `order`, got swallowed by the except below, and vanished whole -- the
+                # reviewer saw a lesson with a rationale that compiled to nothing. A lesson
+                # that silently does nothing is worse than one that is refused out loud.
+                touched = False
+                if "order" in payload and payload.get("field"):
+                    prefs[payload["field"]] = list(payload["order"])
+                    touched = True
                 if "min_capacity" in payload:
                     min_capacity = int(payload["min_capacity"])
+                    touched = True
+                if not touched:
+                    raise KeyError("source_pref needs at least one of `order` or `min_capacity`")
             elif kind == "prompt":
                 text = payload.get("text", "").strip()
                 if text and text not in addenda:
