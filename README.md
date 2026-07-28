@@ -155,14 +155,13 @@ topology ops as a seventh lesson kind, routed through Atlas's gate — is R5 in
 
 ## Known limits
 
-- **The deterministic inducer only handles the `acos` field.** Corrections to other columns
-  produce no lesson on that path. The compiler and gate already support all six kinds; only
-  the inducer is narrow. (R1 — the highest-value next change.)
-- **Not every column can learn the same way.** `beds` and `management` are *retrieved* facts,
-  so a correction means "this source was wrong" and `source_pref` is the right lesson.
-  `avg_monthly_fee` is *modeled* — there is no source to prefer, so emitting a `source_pref`
-  lesson there would be inert while looking like learning. R1 is scoped to retrieved fields
-  for that reason.
+- **Not every column learns the same way.** `beds`, `management` and `services` are
+  *retrieved*, so a correction means "this source was wrong" and compiles to a `source_pref`
+  lesson demoting it. `avg_monthly_fee` is *modeled* — there is no source to prefer, so a
+  `source_pref` lesson there would be inert while looking like learning, and the inducer
+  refuses to write one. Fees need an interval with a stated method instead; that is unbuilt.
+- **`acos` corrections still only move a threshold or a blocklist.** The richer lesson kinds
+  (`alias`, `rule`, `prompt`) are reachable only through the agent induction path.
 - **California is the only state with an ALF licensure connector.** Other ZIPs fall back to
   CMS-only, which returns skilled nursing and no state-licensed assisted living.
 - **Distance is straight-line** from the origin ZIP centroid, not driving distance.
