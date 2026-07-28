@@ -254,7 +254,9 @@ async def enrich(
         # out is what makes every proposed cell fall through to the reviewer callback.
         # Reads and the unknown-recorder are pre-approved; only writes are gated.
         allowed_tools=["mcp__atlas__record_unknown", "WebSearch", "WebFetch"],
-        can_use_tool=can_use_tool,
+        # The gate is the PreToolUse hook defined above, NOT `can_use_tool` -- see its
+        # docstring. A hook fires unconditionally; the permission callback does not.
+        hooks={"PreToolUse": [sdk.HookMatcher(hooks=[pre_tool_use])]},
         max_turns=max(8, len(batch) * 4),
         permission_mode="default",
     )
