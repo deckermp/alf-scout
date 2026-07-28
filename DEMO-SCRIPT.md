@@ -147,6 +147,41 @@ Then say the thing the whole recording exists to say:
 
 Point at `active policy unchanged: True`. That boolean is the argument.
 
+## Beat 7b — the same gate, applied to the pipeline's own shape (60s)
+
+Optional, but it's the strongest thirty seconds in the recording if you have room.
+
+Everything so far tuned a *parameter*. A `topology` lesson changes the pipeline's
+**structure** — it takes a node out of the graph. That is the most dangerous thing feedback
+can do, so it faces the same gate:
+
+```
+$ .venv/bin/python -m pytest tests/test_topology.py -q     # 8 passed
+```
+
+Disabling `enrich_registry` — the kind of change a plausible-sounding instruction produces
+("stop hitting the registry, it's slow"):
+
+```
+DECISION: QUARANTINE
+  - GUARDRAIL: recall regressed 1.0 -> 0.0 (3 true affiliations lost)
+  - GUARDRAIL: beds coverage 0.0 below floor 0.95
+  - GUARDRAIL: 0 rows discovered, floor is 140
+
+  aco_precision  0.75 → 1.0        aco_recall     1.0 → 0.0
+  beds_coverage   1.0 → 0.0        rows_total     163 → 0
+```
+
+Say the part that makes it land: **it improved precision and was refused anyway.** A system
+optimizing its headline metric would have taken that change and returned an empty table with
+perfect precision.
+
+Then name the second defence, because the gate isn't the only one: `resolve_zip`, `discover`,
+`apply_overrides`, and `finalize` can never be disabled, whatever a lesson asks for.
+`apply_overrides` is on that list specifically because dropping it would stop applying the
+reviewer's own corrections — a topology lesson could otherwise quietly discard human work
+while reporting success. That bound is structural and doesn't depend on the evals agreeing.
+
 ## Beat 8 — what isn't built (45s)
 
 Don't end on a triumph. Name the gaps:
@@ -160,12 +195,12 @@ Don't end on a triumph. Name the gaps:
   source was wrong here" and `source_pref` fits. `avg_monthly_fee` is *modeled, never
   retrieved* — there is no source to prefer, so a `source_pref` lesson there would be inert
   while looking like learning. Widening is scoped to retrieved fields for exactly that reason.
-- **No topology evolution.** The pipeline can retune itself but cannot restructure itself — it
-  cannot add a node. That capability exists in the `server/` prototype (typed, revertible
-  `PatchOp`s; its DAG reached v3 with two nodes added from live feedback and the `aco` weight
-  doubled 0.15 → 0.30). The merge is designed but unbuilt: a topology patch becomes a seventh
-  lesson kind whose compiled artifact is a graph instead of a threshold — and which has to
-  clear the same gate.
+- **Topology evolution is partial.** The pipeline can now *remove* a node from itself — see
+  Beat 7b — but it cannot yet *add* one. Adding a node needs an executor, and the only
+  general-purpose one is the agentic path, which the frozen-set replay runs with
+  `agentic=False`. So an added node would be un-gateable today: it would shadow-replay
+  identically to active and could never earn promotion. Removal is gateable and shipped;
+  addition is designed and honest about why it's blocked.
 - **One state.** The ALF connector covers CA. Everything else is structure without coverage.
 
 ## Beat 9 — close (20s)
