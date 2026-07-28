@@ -92,11 +92,23 @@ async function resolveCurrentDag() {
 // that answers it are looking at the same object.
 const PENDING = new Map(); // requestId -> {resolve, request, runId}
 
-function makeHitl(runId, gate) {
+// Gating is scoped to specific NODES, not just tool names, and that is a
+// correctness requirement rather than a preference. `allowedTools` governs what
+// the model can SEE, not merely what is auto-approved — so a gated tool is left
+// out of the list and becomes invisible unless ToolSearch resurfaces it.
+// Gating record_facilities on every node therefore disarmed the enrichment
+// nodes entirely ("nothing was written — record_facilities is unavailable") and
+// the table came back with names but no beds or fees. One deliberate checkpoint
+// on `discover` demonstrates the seam without starving the rest of the graph.
+const DEFAULT_GATE_NODES = ["discover"];
+
+function makeHitl(runId, gate, gateNodes = DEFAULT_GATE_NODES) {
+  const scope = Array.isArray(gateNodes) && gateNodes.length ? gateNodes : null;
   return {
     // gate: false | true | string[] of tool names to gate.
-    shouldGate(_nodeId, toolName) {
+    shouldGate(nodeId, toolName) {
       if (!gate) return false;
+      if (scope && nodeId && !scope.includes(nodeId)) return false;
       if (gate === true) return true;
       return Array.isArray(gate) && gate.includes(toolName);
     },
@@ -143,6 +155,13 @@ function makeEmit(runId, s) {
   return (event) => {
     const ev = { ...event, runId };
     try { s.appendEvent(runId, ev.type || "event", ev); } catch { /* store is best-effort */ }
+    // Persist the partial table as it builds, not just at run_end. The dashboard
+    // polls GET /runs/:id every 2s as an SSE fallback, and a client that joins
+    // (or refreshes) mid-run must see the rows that already exist rather than an
+    // empty grid attached to a run that is visibly working.
+    if (ev.type === "facilities" && Array.isArray(ev.facilities)) {
+      try { s.updateRun(runId, { facilities: ev.facilities }); } catch { /* best effort */ }
+    }
     emitWire(ev);
   };
 }
@@ -163,7 +182,7 @@ research.post("/run", async (req, res) => {
 
     const emit = makeEmit(runId, s);
     const gate = req.body?.gate ?? (process.env.RESEARCH_HITL === "1");
-    const hitl = makeHitl(runId, gate);
+    const hitl = makeHitl(runId, gate, req.body?.gateNodes);
 
     // Fire and forget — the response must not wait on an agent pipeline.
     startRun({ zip, spec, runId, emit, hitl })

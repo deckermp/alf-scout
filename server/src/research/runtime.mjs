@@ -224,6 +224,13 @@ export function buildGraph(spec, deps = {}) {
           : rankFacilities(state.facilities || []);
         emit({ type: "node_end", runId, nodeId: node.id, label: node.label || node.id,
           summary: `${node.id} over ${out.length} facilities`, count: out.length, ts: new Date().toISOString() });
+        // Stream the table's construction. Without this the UI has nothing to
+        // draw until run_end, so a 4-minute run looks like a dead page with a
+        // ticking log. Emitting the cumulative set after every node lets the
+        // table fill in field-by-field: names first, then management, then
+        // beds/fees, then the whole thing reorders when score/rank land.
+        emit({ type: "facilities", runId, nodeId: node.id, facilities: out,
+          count: out.length, ts: new Date().toISOString() });
         // Replace wholesale: score/rank rewrite every row, and the merge reducer
         // keeps them keyed by id so this is a field-level update, not a wipe.
         return { facilities: out };
@@ -233,6 +240,14 @@ export function buildGraph(spec, deps = {}) {
     g.addNode(node.id, async (state) => {
       emit({ type: "node_start", runId, nodeId: node.id, label: node.label || node.id, ts: new Date().toISOString() });
       const res = await executeNode({ node, state, runId, emit, hitl });
+      // Broadcast the cumulative table, not just this node's slice — the UI
+      // replaces its rows wholesale on a `facilities` frame, so sending only
+      // the delta would blank out every field an earlier node filled in. Uses
+      // the same reducer the graph does, so what the human sees mid-run is
+      // exactly what the next node receives.
+      const cumulative = mergeFacilities(state.facilities || [], res.facilities || []);
+      emit({ type: "facilities", runId, nodeId: node.id, facilities: cumulative,
+        count: cumulative.length, ts: new Date().toISOString() });
       return {
         facilities: res.facilities || [],
         notes: res.summary ? [`${node.id}: ${res.summary}`] : [],

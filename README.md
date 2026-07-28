@@ -1,146 +1,168 @@
-# S-19 Research — a market-research ADW whose DAG learns from its users
+# ALF Atlas
 
-Status: built 2026-07-28 in a ~45-minute sprint. This document is the reasoning
-record; the code is under `server/src/research/` and `dashboard/src/views/research/`.
+**Input: a ZIP code. Output: a table of assisted-living facilities — distance, beds,
+management, ACO affiliations, service mix — that gets better every time a human corrects it.**
+
+A LangGraph pipeline inside a Claude Agent SDK harness, where human corrections compile into
+a versioned policy and **only take effect if they survive an eval gate**.
+
+```bash
+cd engine && uv sync
+.venv/bin/python -m uvicorn atlas.server:app --port 8099
+open http://localhost:8099/
+```
+
+No API key required. The deterministic path queries CMS and the California licensing registry
+live.
 
 ---
 
-## The problem as stated
+## The claim
 
-> Input: a ZIP code. Output: a table of ALF facilities matching criteria, sorted by
-> various fields — distance, beds, average fees — plus management, partnered ACOs,
-> and service type (IL / AL / Memory Care / Home Health). The user should be able to
-> provide HITL. Wrap LangGraph with an agent harness (Claude Agent SDK) to
-> incorporate HITL from users. Use meta-learning DAG + Agent SDK to evolve the
-> pipeline to improve the output.
+The table is the visible deliverable. The actual deliverable is **the loop that makes the
+table better without an engineer in the room** — and, more importantly, the loop that
+*refuses to apply a change that would make it worse*.
 
-The table is the *visible* deliverable. The actual deliverable is the loop that makes
-the table get better without an engineer in the room.
+Run `.venv/bin/python scripts/demo_loop.py --reset` and you see both halves:
 
-## The three claims this build makes
-
-**1. The DAG is data, not code.**
-A pipeline node is a row — `{id, label, after[], instruction, enabled, origin}` — where
-`instruction` is a natural-language string the harness executes. Nothing about a node is
-compiled in. That single decision is what makes everything downstream possible: if a node
-is a row, then a human's feedback can add one, reword one, or switch one off, and the next
-run is genuinely a different pipeline. If nodes were functions, "evolving the DAG" would
-mean writing code, which is exactly the thing the brief rules out.
-
-`compileDag(BASE_DAG, patches)` folds an append-only patch log into the spec that
-`buildGraph()` hands to LangGraph. Version number goes up. The graph really is different.
-
-**2. `canUseTool` is the HITL seam.**
-The Claude Agent SDK's tool-permission callback is a natural suspension point in an agent's
-execution: the harness is already asking "may I run this?" We answer that question with a
-human instead of a policy. The callback emits a `HitlRequest` over SSE and awaits a promise;
-the dashboard resolves it via `POST /api/research/hitl` with approve / reject-with-reason /
-edit-the-input-and-approve. LangGraph's `interrupt()` + `MemorySaver` handles the coarser
-suspension — pausing *between* nodes with graph state checkpointed — so a run can wait on a
-human for minutes without holding anything open.
-
-Two mechanisms, two granularities, on purpose: `canUseTool` catches "about to do something
-consequential *inside* a node," `interrupt()` catches "a stage finished, review it before I
-continue."
-
-**3. Feedback compiles into structure, not into a prompt.**
-The cheap version of "meta-learning" is appending the user's complaint to a system prompt.
-We don't do that. `evolveFromFeedback()` reads the human's words, the current DagSpec, and
-the result table, and emits a typed `DagPatch` of `add_node` / `edit_instruction` /
-`set_enabled` / `set_weights` operations. Those are structural edits to the graph, they're
-persisted, they're attributable to the sentence that caused them, and — the part that makes
-it honest — **they're revertible**. Every patch has an `active` flag. Toggle it off and the
-next compile drops it.
-
-Say a user writes *"you're missing memory-care bed counts, break those out."* The evolver
-adds an `enrich_memory_care_beds` node downstream of `discover` and bumps the `beds`
-weight. Version 1 → 2. The graph on screen grows a node. No one opened an editor.
-
-## Why this lives in agenthome instead of a new repo
-
-The first instinct was a greenfield Next.js app. Wrong instinct, and I killed it about ten
-minutes in. Agenthome already has the parts that are tedious and load-bearing:
-
-- `server/src/bus.mjs` — `broadcast()` already fans out SSE to every connected dashboard.
-- `server/src/db.mjs` — a SQLite ledger already open, already migrated, already backed up.
-- `dashboard/` — a screen registry, hash routing, a design-token palette, mermaid, and a
-  Trace view whose visual language the new screen inherits for free.
-
-Building a second harness would have meant spending the sprint on plumbing that already
-works, and shipping something that looked like a demo rather than something that looked like
-it belonged to a system. The research surface is one router mount, one screen registration,
-and six new modules.
-
-## Shape
+**It promotes a good lesson.** A reviewer rejects three false-positive ACO matches. The
+inducer finds the boundary separating rejected matches (top score 0.867) from confirmed ones
+(1.000), proposes `aco_match_threshold = 0.872`, and the gate shadow-replays 163 frozen rows:
 
 ```
- ZIP ─→ ┌──────────────────── LangGraph (compiled from DagSpec) ────────────────────┐
-        │  discover ─┬─→ enrich_management ─┐                                       │
-        │            ├─→ enrich_aco ────────┼─→ score ─→ rank ─→ facilities[]       │
-        │            └─→ enrich_services ───┘                                       │
-        └───────┬──────────────────────────────────────────────────┬────────────────┘
-                │ each node's instruction executed by              │
-                ▼                                                  ▼
-        Claude Agent SDK query()                            score/rank computed
-        · MCP tools: zip_centroid, haversine_miles,          locally (deterministic,
-          record_facilities, WebSearch, WebFetch             confidence-weighted)
-        · canUseTool ──→ HitlRequest ──SSE──→ dashboard
-                            ▲                    │
-                            └── POST /hitl ──────┘
-                                                 │  human feedback
-                                                 ▼
-                                        evolveFromFeedback()
-                                                 │ DagPatch
-                                                 ▼
-                                        append-only patch log ──→ compileDag() ──→ next run
+DECISION: PROMOTE
+  aco_precision         0.75 → 1.0        aco_false_positives   1 → 0
+  aco_recall             1.0 → 1.0        rows_total          163 → 163
 ```
 
-The three enrichment branches run in parallel and fan back in. The facilities reducer
-**merges by facility id** rather than replacing the array — otherwise the last branch to
-finish would silently clobber the other two. That's the subtlest bug in the design and it's
-commented as such in `runtime.mjs`.
+**It refuses a bad one.** The same script then proposes a lesson that buys precision by
+destroying recall:
+
+```
+DECISION: QUARANTINE
+  GUARDRAIL: recall regressed 1.0 → 0.0 (3 true affiliations lost)
+  active policy unchanged: True
+```
+
+**That refusal is the point.** A self-improving system that only ever accepts its own
+proposals is theater. This one holds a frozen ground-truth set, computes precision *and*
+recall, and quarantines the lesson. There is deliberately no `force` parameter on
+`POST /api/gate`.
+
+---
+
+## How it's built
+
+```
+ZIP ─→ discover ─┬─→ enrich_registry ─┐
+                 ├─→ join_aco ────────┼─→ review (HITL pause) ─→ score ─→ table
+                 └─→ enrich_agentic ──┘           │
+                                                  │ verdicts
+                                                  ▼
+                                    induce ─→ lessons ─→ GATE ─→ policy vN+1
+                                                          │
+                                                    (or quarantine)
+```
+
+**Nodes read a policy, never the lesson store.** Lessons compile deterministically into an
+immutable, version-hashed `Policy`. A run records the version it executed under, so replaying
+a version reproduces the table. That is also what makes the gate meaningful — you cannot
+shadow-evaluate "the lessons so far," only one compiled artifact against another.
+
+**Two HITL granularities.** LangGraph's `interrupt()` + checkpointer pauses *between* nodes
+with graph state persisted, so a run can wait on a human indefinitely. The Agent SDK's
+`canUseTool` callback catches "about to do something consequential *inside* a node."
+
+**Six lesson kinds**, each re-parameterizing exactly one node: `alias`, `threshold`,
+`blocklist` (→ `join_aco`), `rule`, `source_pref` (→ `enrich_registry`), `prompt`
+(→ `enrich_agentic`).
+
+---
 
 ## The honesty layer
 
-This data is agent-researched, not authoritative. Pretending otherwise would be the worst
-possible failure mode in a healthcare-adjacent tool, so the type system refuses to let us:
+Every field is `Sourced` — `{value, confidence, source, note, retrieved_at, human_verified,
+corrected_from}`. Unknown is `null` **with a reason**, never `0` and never a plausible guess.
 
-- Every field is `Sourced<T>` = `{value, prov: {source, confidence, note}}`. The
-  `record_facilities` tool **rejects** any numeric field submitted without provenance.
-- Unknown is `{value: null}` with a reason — never `0`, never `"N/A"`. The table renders an
-  em-dash and puts the reason in the tooltip.
-- The composite score multiplies each normalized dimension by that field's confidence, so a
-  facility can't win the ranking on numbers we aren't sure about.
-- The UI renders sub-0.5-confidence values visually distinct.
+Column fill rate for ZIP `94301`, deterministic path:
 
-This is the discipline from `~/Documents/sevah-prep/REAL-VS-SIMULATED.md`, applied at the
-type level instead of in a README.
+| Filled | Columns | Why |
+|---|---|---|
+| 35/35 | `distance_mi` · `beds` · `bed_basis` · `management` · `services` | registry-sourced |
+| 4/35 | `acos` | **inferred, never retrieved** |
+| 0/35 | `avg_monthly_fee` | **modeled — no registry publishes it** |
 
-## Known cuts, stated plainly
+The two thin columns are thin on purpose, and the engine says so rather than filling them:
 
-- **No authoritative data ingest.** No CMS Provider of Services file, no state licensure
-  database. Facilities are researched live by the agent. A production version replaces the
-  `discover` node's tool set with a licensure API and keeps everything else identical —
-  which is a point in favor of nodes-as-data.
-- **Distance is straight-line** from ZIP centroid, not driving distance, and the centroid
-  table is a small embedded fixture covering the demo ZIPs.
-- **Patch store is SQLite-local.** Survives restart on this machine; not multi-user.
-- **The evolver can be wrong.** It's an LLM proposing structural edits. Mitigations:
-  guardrails reject ops that delete `discover` or disable every node, invalid ops are
-  dropped rather than thrown, a deterministic weight-nudge heuristic backs it up when the
-  model returns junk, and every patch is revertible by the human who caused it.
+> `acos` — *"No MSSP ACO affiliate in CA matched this facility's names at threshold 0.87.
+> Absence of a match is not evidence of no affiliation."*
 
-## Verify it end to end
+> `avg_monthly_fee` — *"No public registry publishes per-facility pricing. National median AL
+> is ~$5,900/mo (Genworth-derived) but that is a market statistic, not this facility's rate."*
 
-```bash
-cd ~/Documents/agenthome/server && npm start          # :4747
-cd ~/Documents/agenthome/dashboard && npm run dev     # :4748 → #/research
+There is no public facility↔ACO mapping — ACO attribution is at the beneficiary level, not the
+facility level — so that column is derived by name-matching against MSSP affiliate rosters,
+scored, gated, and left empty when nothing clears the bar. An empty cell with a stated reason
+beats a confident wrong number, most of all in `acos`, which is the column a user would
+actually act on.
+
+---
+
+## Repo layout
+
+```
+engine/                    THE TOOL — Python, FastAPI, LangGraph
+  atlas/pipeline.py        ZIP in, table out; interrupt/resume across a checkpointer
+  atlas/graph/             LangGraph topology
+  atlas/harness/agent.py   Claude Agent SDK wrapper
+  atlas/meta/              policy · compiler · induce · evals (the gate) · store
+  atlas/sources/           CMS · ACO · geocode · states/ca · disk cache
+  evals/frozen_set.json    ground truth the gate judges against
+  ui/index.html            complete UI: search, table, verdicts, policy, gate
+  Dockerfile
+
+server/ · dashboard/ · lib/   SUPERSEDED first lineage — see INTEGRATION.md
+app/                          Next.js shell
 ```
 
-1. Enter `33701`. Watch nodes light up in the DAG panel as the run streams.
-2. When the agent pauses for permission, answer it in the HITL panel — the run resumes.
-3. Sort the table by beds, then by fee. Note the confidence dots and the em-dashes.
-4. Type feedback: *"you're missing memory-care bed counts, break those out separately."*
-5. Watch a patch appear with its rationale, the DAG version increment, and a new node
-   render in the graph. Run `33701` again — the pipeline is different.
-6. Toggle the patch off. The node disappears. That's the revert path.
+### Two lineages, honestly
+
+This repo contains two implementations. `server/` + `dashboard/` is a Node build whose thesis
+was **DAG-as-data**: a node is a row with a natural-language instruction, so feedback can add,
+reword, or disable nodes and the next run is a genuinely different graph. It works — driven
+from a sibling harness it reached DAG v3, with `golden_set_validation` and `aco_conflict_filter`
+added from live user feedback and the `aco` weight raised 0.15 → 0.30.
+
+It is superseded as *the tool* because it has no authoritative data ingest: facilities are
+researched live by an agent rather than pulled from a licensure registry. Atlas wins on
+exactly the axis a reviewer will push hardest — registry-sourced beats web-inferred, and an
+honest `0/35` on fees beats a handful of inferred numbers.
+
+**Its one surviving contribution is topology evolution, which Atlas does not do.** Atlas
+evolves *parameters* behind a gate; the Node build evolves *shape* without one. Merging them —
+topology ops as a seventh lesson kind, routed through Atlas's gate — is R5 in
+`INTEGRATION.md`.
+
+---
+
+## Docs
+
+| | |
+|---|---|
+| [`TESTING.md`](TESTING.md) | verified setup, smoke commands, what a passing run proves |
+| [`INTEGRATION.md`](INTEGRATION.md) | which lineage is live, why, ranked remaining work R1–R6 |
+| [`engine/INDEX.md`](engine/INDEX.md) | Atlas's own build notes |
+
+## Known limits
+
+- **Not every column learns the same way.** `beds`, `management` and `services` are
+  *retrieved*, so a correction means "this source was wrong" and compiles to a `source_pref`
+  lesson demoting it. `avg_monthly_fee` is *modeled* — there is no source to prefer, so a
+  `source_pref` lesson there would be inert while looking like learning, and the inducer
+  refuses to write one. Fees need an interval with a stated method instead; that is unbuilt.
+- **`acos` corrections still only move a threshold or a blocklist.** The richer lesson kinds
+  (`alias`, `rule`, `prompt`) are reachable only through the agent induction path.
+- **California is the only state with an ALF licensure connector.** Other ZIPs fall back to
+  CMS-only, which returns skilled nursing and no state-licensed assisted living.
+- **Distance is straight-line** from the origin ZIP centroid, not driving distance.
+- `data/atlas.db` is local SQLite — single-machine, not multi-user.

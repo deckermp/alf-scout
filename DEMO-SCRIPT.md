@@ -1,101 +1,216 @@
-# S-19 Research — recorded walkthrough script
+# ALF Atlas — recorded walkthrough
 
-Target length: 4–6 minutes. The point of the recording is not "look, a table." It is
-**the pipeline changed shape because a human said something.** Everything else is setup
-for that moment.
+Target length: 6–8 minutes.
+
+**The line to demo is the QUARANTINE, not the promote.** Precision 0.75 → 1.0 is a good
+result, but any system that applies whatever the human says can produce a good result by
+accident. Refusing a lesson that would have taken recall 1.0 → 0.0 is what distinguishes a
+learning loop from a feedback form. Structure the recording so that refusal is the payoff,
+and treat everything before it as the setup that earns it.
+
+> This script replaced an earlier one written against a different build — the Node
+> DAG-as-data prototype now sitting in `server/`. That build is not the tool. If you find a
+> beat here that mentions `record_facilities`, `canUseTool`, or a mermaid DAG panel, it
+> escaped the rewrite: cut it.
 
 ## Before you hit record
 
 ```bash
-cd ~/Documents/agenthome/server   && npm start        # :4747
-cd ~/Documents/agenthome/dashboard && npm run dev     # :4748
-open http://localhost:4748/#/research
+cd engine && uv sync
+.venv/bin/python -m pytest tests/ -q                     # 34 passed
+.venv/bin/python -m uvicorn atlas.server:app --port 8099 # leave running
+open http://localhost:8099/
 ```
 
-Check: DAG panel renders 6 nodes at **version 1**. If patches from testing are already
-active, deactivate them in the Evolution panel first so the demo starts clean — the
-version number climbing from 1 is the visual spine of the whole story.
+Second terminal, ready but **not yet run**:
+
+```bash
+.venv/bin/python scripts/demo_loop.py --reset
+```
+
+Check `GET /api/health` returns `"ok":true` and note the `policy_version` — you'll point at it
+changing later. `--reset` restores the pre-lesson state, so run it once before recording and
+once during; the numbers below are what you should see both times.
 
 ## Beat 1 — the ask (30s)
 
-State the problem in the brief's own terms: ZIP in, a table of assisted living facilities
-out, sorted by distance / beds / fees, with management, ACO relationships, and service mix.
-Then say the part that matters: *the table is the demo, the loop is the product.*
+State it in the brief's own terms: a ZIP code in, a table of assisted-living facilities out,
+sorted by distance, beds, and fees, with management, ACO affiliations, and service mix. A
+human can intervene. The pipeline learns.
 
-## Beat 2 — the graph is data (45s)
+Then the sentence the rest of the recording defends: *the table is the visible deliverable;
+the loop that refuses to make the table worse is the actual one.*
 
-Point at the DAG panel before running anything. Six nodes: `discover` fans out to three
-parallel enrichment nodes, which fan back into `score` → `rank`.
+## Beat 2 — real data, no credentials (60s)
 
-Say the load-bearing sentence: **a node here is a row in a spec, not a function.** Its
-`instruction` is a natural-language string the agent executes. That's the design decision
-everything else depends on — if nodes were code, "evolve the pipeline" would mean writing
-code, which is the thing we're trying to avoid.
+Enter `94301`. Thirty-five facilities come back with real names, real street addresses, real
+geocodes.
 
-## Beat 3 — run it (60s)
+Say where it comes from: **CMS and the California licensing registry, queried live, with no
+API key.** This is not a fixture replay — a deployed endpoint genuinely works. Open a `beds`
+cell and show `source: S1`, `confidence: registry`.
 
-Enter `33701`. Narrate while it streams:
-- Nodes light up live over SSE as LangGraph executes them.
-- The three enrichment branches genuinely run in parallel and fan back in. Mention the bug
-  this surfaced: concurrent writes to one state channel throw
-  `INVALID_CONCURRENT_GRAPH_UPDATE` in LangGraph. Fixed with a reducer that merges by
-  facility id, field-by-field, preferring non-null and breaking ties on confidence.
+This beat buys credibility for Beat 7. A reviewer who believes the data is real will believe
+the eval gate is real.
 
-## Beat 4 — the agent stops and asks (60s) ← *first payoff*
+## Beat 3 — the honesty layer (60s)
 
-When the HITL panel appears, slow down. This is the architectural claim:
+Fill rates on the deterministic path, ZIP 94301, radius 5 — read them out:
 
-> The Claude Agent SDK's `canUseTool` callback is already the agent asking permission.
-> We answer it with a human instead of a policy.
+| Column | Filled | Class |
+|---|---|---|
+| `distance_mi` | 35/35 | derived |
+| `beds` | 35/35 | registry |
+| `management` | 35/35 | registry |
+| `services` | 35/35 | registry / derived |
+| `acos` | 4/35 | derived |
+| **`avg_monthly_fee`** | **0/35** | **unknown, with a reason** |
 
-Show all three responses exist — approve, reject-with-reason, edit-the-input-and-approve —
-and use **edit** at least once so it's clear the human can change what the agent does, not
-just gate it. Mention the second, coarser mechanism: LangGraph `interrupt()` +
-`MemorySaver` checkpoints *between* nodes, so a run can wait on a person for minutes
-without holding anything open.
+Open the fee cell. Not `0`, not `"N/A"`, not a plausible guess — `null`, carrying the note
+that **no public registry publishes per-facility pricing**, plus the national median clearly
+labeled as context rather than as this facility's price.
 
-## Beat 5 — the honesty layer (45s)
+Say why it matters here specifically: this is healthcare-adjacent, and a confident wrong
+number is worse than an honest gap. Every cell carries `confidence`, `source`,
+`retrieved_at`, `human_verified`, and `corrected_from`, so "how do you know that" always has
+an answer.
 
-Hover a low-confidence cell. Show the provenance dot, the source, and an em-dash where a
-value is unknown.
+Name the `acos` 4/35 too: ACO affiliation is *inferred, never retrieved* — there is no public
+facility↔ACO mapping, so attribution runs through business-name matching. That is precisely
+why it needs a threshold, which is what Beats 5–7 are about.
 
-> This data is agent-researched, not authoritative. The `record_facilities` tool **rejects**
-> any numeric field submitted without provenance, unknown is `null` with a reason and never
-> `0` or `"N/A"`, and the composite score multiplies each dimension by that field's
-> confidence — so a facility cannot win the ranking on numbers we aren't sure about.
+## Beat 4 — the human corrects it (60s)
 
-In a healthcare-adjacent tool this is the difference between a demo and a liability.
+In the UI, reject the three false-positive ACO matches (`NEW HAVEN` × `VIOLET HOLDINGS`) and
+confirm the true one (`THE VINEYARDS` × Stanford ACO).
 
-## Beat 6 — evolution (90s) ← *the real payoff*
+Point at two things:
+- Corrections persist as **overrides on those rows** — the human's answer isn't discarded
+  once a lesson is derived from it.
+- Nothing about the pipeline has changed yet. A correction is evidence, not an instruction.
+  Resist skipping ahead; the gap between "human spoke" and "system changed" is the argument.
 
-Type into the feedback box, verbatim:
+## Beat 5 — the correction becomes a proposal, with reasoning (45s)
 
-> "You're missing memory-care bed counts — break those out separately, and I care more about
-> cost than distance."
+Run `demo_loop.py --reset` and walk the output. The inducer finds the boundary:
 
-Then show, in order:
-1. The patch appears with the evolver's **rationale in its own words**.
-2. The concrete ops — an `edit_instruction` on `enrich_services` and a `set_weights` moving
-   weight from distance to fee. (Verified live: the model chose to reword the existing node
-   rather than add one, which is the better call and worth pointing out — it reasoned about
-   the graph rather than just appending to it.)
-3. The DAG version increments. The graph on screen changes.
-4. Re-run `33701`. **The pipeline is different.** No one opened an editor.
+```
+kind=threshold  node=join_aco  status=proposed
+  payload   : {"aco_match_threshold": 0.872}
+  rationale : Reviewer rejected 3 ACO match(es), the highest scoring 0.867.
+              Lowest confirmed match scores 1.000. A threshold of 0.872
+              separates the two populations on the evidence seen so far.
+```
 
-## Beat 7 — the revert (30s)
+Read the rationale aloud. It cites the scores it actually saw — 0.867 rejected, 1.000
+confirmed — and picks a number between them. A lesson with evidence attached, status
+`proposed`, not `active`.
 
-Toggle the patch off. Version drops, weights return to base, the graph reverts. Say why this
-matters: the evolver is an LLM proposing structural edits to a pipeline, so every change it
-makes has to be attributable to the sentence that caused it and undoable by the person who
-said it. Guardrails also refuse ops that would delete `discover` or disable every node, and
-invalid ops are dropped rather than crashing the run.
+## Beat 6 — the gate promotes it (45s)
 
-## Beat 8 — close honestly (30s)
+The gate shadow-replays **163 frozen rows**, candidate against active:
 
-Name the cuts without hedging: no CMS or state-licensure ingest, distance is straight-line
-from a ZIP centroid fixture, the patch store is local SQLite, and the evolver can be wrong —
-which is exactly why revert exists.
+```
+DECISION: PROMOTE
+  aco_precision      0.75 → 1.0        aco_false_positives   1 → 0
+  aco_recall          1.0 → 1.0        rows_total          163 → 163
+```
 
-Then the forward statement: replacing `discover`'s tool set with a real licensure API
-changes nothing else in the system. That's the argument for nodes-as-data, and it's the
-reason this was built inside an existing harness instead of as a fresh demo app.
+Policy version changes, threshold moves 0.86 → 0.872, and the re-run shows false positives
+gone with the true affiliation kept.
+
+Note the guardrail column: recall held at 1.0. Promotion required the target metric to improve
+**and** nothing else to regress.
+
+## Beat 7 — the gate refuses (90s) ← *the payoff*
+
+Slow all the way down.
+
+The script proposes a second lesson that buys precision by destroying recall
+(`aco_min_key_tokens = 5`, `aco_min_key_chars = 40`):
+
+```
+DECISION: QUARANTINE
+  - target metric did not improve: precision 1.0 -> 1.0, recall 1.0 -> 0.0
+  - GUARDRAIL: recall regressed 1.0 -> 0.0 (3 true affiliations lost)
+  lesson status now: quarantined
+  active policy unchanged: True
+```
+
+Then say the thing the whole recording exists to say:
+
+> A system that applies whatever the human tells it isn't learning — it's obeying, and it can
+> be argued into being worse. This one measured the proposed change against 163 frozen rows,
+> found it would throw away every true affiliation to buy precision it already had, and
+> **refused it**. The correction is still on file. The policy is unchanged. Nothing silently
+> degraded.
+
+Point at `active policy unchanged: True`. That boolean is the argument.
+
+## Beat 7b — the same gate, applied to the pipeline's own shape (60s)
+
+Optional, but it's the strongest thirty seconds in the recording if you have room.
+
+Everything so far tuned a *parameter*. A `topology` lesson changes the pipeline's
+**structure** — it takes a node out of the graph. That is the most dangerous thing feedback
+can do, so it faces the same gate:
+
+```
+$ .venv/bin/python -m pytest tests/test_topology.py -q     # 8 passed
+```
+
+Disabling `enrich_registry` — the kind of change a plausible-sounding instruction produces
+("stop hitting the registry, it's slow"):
+
+```
+DECISION: QUARANTINE
+  - GUARDRAIL: recall regressed 1.0 -> 0.0 (3 true affiliations lost)
+  - GUARDRAIL: beds coverage 0.0 below floor 0.95
+  - GUARDRAIL: 0 rows discovered, floor is 140
+
+  aco_precision  0.75 → 1.0        aco_recall     1.0 → 0.0
+  beds_coverage   1.0 → 0.0        rows_total     163 → 0
+```
+
+Say the part that makes it land: **it improved precision and was refused anyway.** A system
+optimizing its headline metric would have taken that change and returned an empty table with
+perfect precision.
+
+Then name the second defence, because the gate isn't the only one: `resolve_zip`, `discover`,
+`apply_overrides`, and `finalize` can never be disabled, whatever a lesson asks for.
+`apply_overrides` is on that list specifically because dropping it would stop applying the
+reviewer's own corrections — a topology lesson could otherwise quietly discard human work
+while reporting success. That bound is structural and doesn't depend on the evals agreeing.
+
+## Beat 8 — what isn't built (45s)
+
+Don't end on a triumph. Name the gaps:
+
+- **The learning loop closes for one column.** `induce_deterministic()` filters to `acos` and
+  emits nothing for `beds`, `management`, `services`, or `avg_monthly_fee`. A correction to a
+  bed count teaches the system nothing durable today. Schema, compiler, and gate already
+  support all six lesson kinds — only the inducer is narrow.
+- **Widening it is not uniform**, which is the subtle part worth saying out loud: `beds` and
+  `management` are *retrieved* facts with a registry of record, so a correction means "this
+  source was wrong here" and `source_pref` fits. `avg_monthly_fee` is *modeled, never
+  retrieved* — there is no source to prefer, so a `source_pref` lesson there would be inert
+  while looking like learning. Widening is scoped to retrieved fields for exactly that reason.
+- **Topology evolution is partial.** The pipeline can now *remove* a node from itself — see
+  Beat 7b — but it cannot yet *add* one. Adding a node needs an executor, and the only
+  general-purpose one is the agentic path, which the frozen-set replay runs with
+  `agentic=False`. So an added node would be un-gateable today: it would shadow-replay
+  identically to active and could never earn promotion. Removal is gateable and shipped;
+  addition is designed and honest about why it's blocked.
+- **One state.** The ALF connector covers CA. Everything else is structure without coverage.
+
+## Beat 9 — close (20s)
+
+Adding a state is a connector. Adding a learnable column is an inducer branch. Adding a
+*shape* of change is a lesson kind. All three route through the same gate. The part that took
+real work is the part that says no.
+
+---
+
+### If you only have two minutes
+
+Beats 2, 7, and 8. Real data, the refusal, the honest gaps. That's the argument.

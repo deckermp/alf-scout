@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALF Atlas — ZIP-code senior living market research</title>
+<style>
+  :root {
+    --bg:#fbfaf8; --panel:#ffffff; --line:#e4e0d9; --line-2:#efece7;
+    --ink:#1c1a17; --ink-2:#57524a; --ink-3:#8b8479;
+    --accent:#2f6f5e; --accent-soft:#e8f1ee;
+    --registry:#2f6f5e; --derived:#3f6ea8; --inferred:#9a6b1f; --unknown:#8b8479; --human:#7a3f8c;
+    --warn-bg:#fdf6e8; --warn-line:#e6d3a8;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#15140f; --panel:#1d1c17; --line:#333127; --line-2:#26241d;
+      --ink:#f0ece3; --ink-2:#b3ac9d; --ink-3:#7e776a;
+      --accent:#6dbba3; --accent-soft:#1e2f2a;
+      --registry:#6dbba3; --derived:#7fa9dd; --inferred:#d8a94e; --unknown:#7e776a; --human:#c491d8;
+      --warn-bg:#2a2415; --warn-line:#4d422a;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.5; }
+  header { border-bottom:1px solid var(--line); padding:18px 24px; display:flex; gap:20px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:17px; margin:0; letter-spacing:-.01em; }
+  h1 span { color:var(--ink-3); font-weight:400; }
+  .tag { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  main { padding:20px 24px 80px; max-width:1500px; }
+  .row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:8px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-3); margin-bottom:4px; }
+  input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); }
+  input[type=number] { width:88px; } input#zip { width:112px; font-family:var(--mono); }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  button.primary:disabled { opacity:.5; cursor:wait; }
+  button.mini { padding:2px 7px; font-size:11px; border-radius:4px; }
+  .chk { display:flex; align-items:center; gap:6px; padding-bottom:8px; font-size:12px; color:var(--ink-2); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:14px 16px; margin:14px 0; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); margin:0 0 10px; }
+  .banner { background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:9px; padding:12px 14px; margin:14px 0; font-size:13px; }
+  .stats { display:flex; gap:22px; flex-wrap:wrap; font-family:var(--mono); font-size:12px; color:var(--ink-2); }
+  .stats b { color:var(--ink); font-weight:600; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th { text-align:left; padding:9px 11px; border-bottom:1px solid var(--line); font-size:11px; text-transform:uppercase;
+       letter-spacing:.05em; color:var(--ink-3); white-space:nowrap; position:sticky; top:0; background:var(--panel); }
+  th.sortable { cursor:pointer; user-select:none; } th.sortable:hover { color:var(--ink); }
+  th .dir { color:var(--accent); }
+  td { padding:9px 11px; border-bottom:1px solid var(--line-2); vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+  .fname { font-weight:600; }
+  .fmeta { color:var(--ink-3); font-size:11px; margin-top:2px; }
+  .num { font-family:var(--mono); text-align:right; white-space:nowrap; }
+  .num .why, .num .unk { white-space:normal; text-align:left; font-family:var(--sans); }
+  td { max-width:340px; }
+  .src { display:inline-block; font-family:var(--mono); font-size:9px; letter-spacing:.04em; padding:1px 5px;
+         border-radius:3px; border:1px solid currentColor; margin-left:5px; vertical-align:1px; }
+  .c-registry{color:var(--registry)} .c-derived{color:var(--derived)} .c-inferred{color:var(--inferred)}
+  .c-unknown{color:var(--unknown)} .c-human{color:var(--human)}
+  .unk { color:var(--ink-3); font-style:italic; font-size:12px; }
+  .why { color:var(--ink-3); font-size:11px; margin-top:3px; max-width:330px; white-space:normal; }
+  .aco { margin-bottom:6px; padding-bottom:5px; border-bottom:1px dotted var(--line); }
+  .aco:last-child { border-bottom:none; margin-bottom:0; }
+  .aco-name { font-weight:600; font-size:12px; }
+  .score { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .exact { color:var(--registry); font-weight:600; }
+  .acts { margin-top:4px; display:flex; gap:5px; }
+  .mgmt { font-size:12px; } .mgmt li { margin-bottom:2px; }
+  ul { margin:0; padding-left:15px; }
+  .pill { display:inline-block; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:9px;
+          background:var(--accent-soft); color:var(--accent); margin-right:3px; }
+  .verdicts { position:sticky; bottom:0; background:var(--panel); border-top:2px solid var(--accent);
+              padding:11px 24px; margin:0 -24px -80px; display:none; }
+  .verdicts.on { display:block; }
+  pre { font-family:var(--mono); font-size:11px; background:var(--bg); border:1px solid var(--line);
+        border-radius:6px; padding:10px; overflow-x:auto; margin:8px 0 0; }
+  .lesson { border-left:3px solid var(--accent); padding:6px 0 6px 11px; margin-bottom:9px; font-size:12px; }
+  .lesson.quarantined { border-left-color:var(--inferred); }
+  .lesson .k { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .decision { font-family:var(--mono); font-weight:700; letter-spacing:.05em; }
+  .promote { color:var(--registry); } .quarantine { color:var(--inferred); }
+  .muted { color:var(--ink-3); font-size:12px; }
+  details summary { cursor:pointer; font-size:12px; color:var(--ink-3); }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--ink-2); margin-top:9px; }
+  .dl { color:var(--accent, #2b6cb0); text-decoration:none; border-bottom:1px solid currentColor; }
+  .dl:hover { opacity:.75; }
+  .dag { margin:14px 0 4px; }
+  .dag > summary { cursor:pointer; font-size:12px; color:var(--ink-2); font-family:var(--mono); }
+  .dwrap { display:flex; flex-direction:column; align-items:center; gap:2px; margin:10px 0 4px; }
+  .drow { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .dnode { font-family:var(--mono); font-size:11px; padding:4px 10px; border-radius:5px;
+           border:1px solid var(--line, #d8d8d8); white-space:nowrap; cursor:help; }
+  .dnode.ran { background:var(--ok-bg, #e8f3ea); border-color:var(--ok-line, #7fb08c); color:var(--ink-1, #1c1c1c); }
+  .dnode.skipped { opacity:.45; border-style:dashed; }
+  .darrow { color:var(--ink-2); font-size:11px; line-height:1; }
+  .dhint { font-size:10.5px; margin:2px 0 0; text-align:center; }
+  .fbbox { margin-bottom:12px; padding:10px 12px; border:1px solid var(--line, #d8d8d8); border-radius:6px; }
+  .fbbox label { display:block; font-size:12px; color:var(--ink-2); margin-bottom:6px; }
+  .fbbox textarea { width:100%; box-sizing:border-box; font:inherit; font-size:12.5px; padding:7px 9px;
+                    border:1px solid var(--line, #d8d8d8); border-radius:5px; resize:vertical; margin-bottom:7px; }
+  .fbbox .muted { font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ALF&nbsp;Atlas <span>— ZIP-code senior-living market research</span></h1>
+  <div class="tag" id="hdr">connecting…</div>
+</header>
+
+<main>
+  <div class="row">
+    <div><label for="zip">ZIP code</label><input id="zip" value="94550" maxlength="5"></div>
+    <div><label for="radius">Radius (mi)</label><input id="radius" type="number" value="4" min="0.5" max="50" step="0.5"></div>
+    <div class="chk"><input type="checkbox" id="agentic"><label for="agentic" style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Agentic enrichment</label></div>
+    <button class="primary" id="go">Search</button>
+    <span class="muted" id="status"></span>
+  </div>
+  <div class="muted">Try <b>94550</b> Livermore · <b>94591</b> Vallejo · <b>91360</b> Thousand Oaks · <b>95991</b> Yuba City. Non-CA ZIPs show the coverage gap.<br>
+  The entered ZIP is always searched in full; the radius adds <em>neighbouring</em> ZIP areas by centroid. A large ZCTA can therefore contain a facility further away than the radius — the distance column is the measurement, not the filter.</div>
+
+  <div id="gaps"></div>
+  <div id="summary"></div>
+  <div id="table"></div>
+
+  <div class="panel" id="metaPanel">
+    <h2>Meta-learning — corrections become policy</h2>
+    <div class="fbbox">
+      <label for="feedback">Tell the pipeline what to do differently — this shapes <em>every future run</em>, not just this one.</label>
+      <textarea id="feedback" rows="2" placeholder="e.g. Stop including six-bed board-and-care homes, I only care about 20+ bed communities. Skip the agentic pass — it's slow and I don't trust its fee numbers."></textarea>
+      <div class="row">
+        <button id="teach">Teach the pipeline</button>
+        <span class="muted">Free text can change the graph itself (enable/disable nodes), not just the parameters. Needs <code>ANTHROPIC_API_KEY</code>; per-cell verdicts do not.</span>
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:10px">
+      <button id="induce">1 · Induce lessons from corrections</button>
+      <button id="gate">2 · Run eval gate</button>
+      <button id="refresh">Refresh</button>
+      <span class="muted" id="metaStatus"></span>
+    </div>
+    <div id="policyBox"></div>
+    <div id="lessonBox"></div>
+    <div id="gateBox"></div>
+  </div>
+
+  <details class="panel"><summary>Pipeline trace (what each node actually did)</summary><pre id="trace">run a search first</pre></details>
+</main>
+
+<div class="verdicts" id="vbar">
+  <b id="vcount">0</b> pending verdict(s) — these are the raw material for the next lesson.
+  <button class="primary" id="submitV">Submit to pipeline</button>
+  <button id="clearV">Clear</button>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let RUN = null, ROWS = [], SORT = {key:"distance_mi", dir:1}, VERDICTS = new Map();
+
+const CONF = {registry:"c-registry", derived:"c-derived", inferred:"c-inferred", unknown:"c-unknown"};
+function srcChip(cell) {
+  const human = cell.human_verified || cell.source === "human";
+  const cls = human ? "c-human" : (CONF[cell.confidence] || "c-unknown");
+  const label = human ? "HUMAN" : esc(cell.source);
+  return `<span class="src ${cls}" title="${esc(cell.confidence)}${cell.note ? " — " + esc(cell.note) : ""}">${label}</span>`;
+}
+function unknownCell(cell) {
+  return `<div class="unk">unknown</div><div class="why">${esc(cell.note || "")}</div>`;
+}
+
+function renderSummary(r) {
+  const t = Object.fromEntries((r.trace || []).map(x => [x.node, x]));
+  const j = t.join_aco || {}, e = t.enrich_registry || {}, d = t.discover || {};
+  const cov = Math.round((r.facilities.reduce((a,f) => a + coverage(f), 0) / Math.max(1, r.facilities.length)) * 100);
+  $("#summary").innerHTML = `<div class="panel"><h2>Run ${esc(r.run_id)} · policy <code>${esc(r.policy_version)}</code></h2>
+    <div class="stats">
+      <span><b>${r.facilities.length}</b> facilities</span>
+      <span><b>${d.alf_rows ?? 0}</b> state-licensed ALF</span>
+      <span><b>${d.cms_rows ?? 0}</b> CMS-certified</span>
+      <span><b>${e.geocoded_exact ?? 0}</b> exact geocodes<span class="muted"> / ${e.centroid_fallback ?? 0} centroid</span></span>
+      <span><b>${j.facilities_with_proposals ?? 0}</b> ACO proposals<span class="muted"> (${j.exact_legal_entity_matches ?? 0} exact-legal)</span></span>
+      <span><b>${cov}%</b> cell coverage</span>
+      <span><a class="dl" href="/api/run/${encodeURIComponent(r.run_id)}/csv">⤓ Download CSV</a></span>
+    </div>
+    ${renderDag(r)}
+    <div class="legend">
+      <span class="c-registry">■ registry — a government file said so</span>
+      <span class="c-derived">■ derived — computed by inspectable code</span>
+      <span class="c-inferred">■ inferred — an agent concluded it</span>
+      <span class="c-unknown">■ unknown — with a stated reason</span>
+      <span class="c-human">■ human — a reviewer established it</span>
+    </div></div>`;
+}
+// The graph, drawn from the run's own trace rather than a hardcoded picture -- a node
+// that did not execute cannot light up, which is the point of showing it at all.
+const DAG_ROWS = [
+  [{id:"resolve_zip", label:"Resolve ZIP"}],
+  [{id:"discover", label:"Discover"}],
+  [{id:"enrich_registry", label:"Registry"}, {id:"join_aco", label:"Join ACO"}, {id:"enrich_agentic", label:"Agentic"}],
+  [{id:"apply_overrides", label:"Overrides"}],
+  [{id:"review", label:"Review · HITL"}],
+  [{id:"apply_verdicts", label:"Apply verdicts"}],
+  [{id:"finalize", label:"Score & rank"}],
+];
+function renderDag(r) {
+  const t = Object.fromEntries((r.trace || []).map(x => [x.node, x]));
+  const rows = DAG_ROWS.map((row, i) => {
+    const cells = row.map(n => {
+      const hit = t[n.id];
+      const cls = hit ? "dnode ran" : "dnode skipped";
+      const detail = hit
+        ? Object.entries(hit).filter(([k]) => k !== "node")
+            .map(([k, v]) => `${k}: ${v}`).join("\n") || "ran"
+        : "did not run on this pass";
+      return `<span class="${cls}" title="${esc(detail)}">${esc(n.label)}</span>`;
+    }).join("");
+    const arrow = i < DAG_ROWS.length - 1 ? `<span class="darrow">↓</span>` : "";
+    return `<div class="drow">${cells}</div>${arrow}`;
+  }).join("");
+  return `<details class="dag" open><summary>Pipeline graph — ${
+    (r.trace || []).length} nodes executed${r.agentic_enabled ? "" : " · agentic off"}</summary>
+    <div class="dwrap">${rows}</div>
+    <p class="muted dhint">Hover a node for what it actually did. Grey nodes did not run.</p>
+  </details>`;
+}
+const coverage = f => ["distance_mi","beds","avg_monthly_fee","management","services","acos"]
+  .filter(k => f[k] && f[k].value !== null && f[k].value !== undefined).length / 6;
+
+function renderGaps(r) {
+  $("#gaps").innerHTML = (r.gaps || []).map(g => `<div class="banner">
+    <b>Coverage gap — ${esc(g.state)}.</b> ${esc(g.reason)}
+    <div class="muted" style="margin-top:5px">What would close it: ${esc(g.what_would_close_it)}</div></div>`).join("");
+}
+
+const SORTS = {
+  distance_mi: f => f.distance_mi.value ?? 1e9,
+  beds:        f => -(f.beds.value ?? -1),
+  avg_monthly_fee: f => f.avg_monthly_fee.value ?? 1e9,
+  name:        f => f.name.toUpperCase(),
+  acos:        f => -((f.acos.value || []).length),
+};
+
+function renderTable() {
+  const rows = [...ROWS].sort((a,b) => {
+    const g = SORTS[SORT.key] || SORTS.distance_mi;
+    const x = g(a), y = g(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * SORT.dir;
+  });
+  const th = (k, label, extra="") =>
+    `<th class="sortable ${extra}" data-k="${k}">${label}${SORT.key===k ? ` <span class="dir">${SORT.dir>0?"▲":"▼"}</span>` : ""}</th>`;
+
+  $("#table").innerHTML = `<div class="scroll"><table><thead><tr>
+    ${th("name","Facility")}${th("distance_mi","Distance")}${th("beds","Beds")}
+    ${th("avg_monthly_fee","Avg monthly fee")}<th>Management</th><th>Services</th>${th("acos","ACOs")}
+  </tr></thead><tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`;
+
+  document.querySelectorAll("th.sortable").forEach(el => el.onclick = () => {
+    const k = el.dataset.k;
+    SORT = {key:k, dir: SORT.key === k ? -SORT.dir : 1};
+    renderTable();
+  });
+  document.querySelectorAll("[data-act]").forEach(el => el.onclick = () => {
+    const {act, fid, field, aco} = el.dataset;
+    if (act === "confirm") addVerdict(fid, field, {action:"confirm", note:"reviewer confirmed"});
+    if (act === "reject")  addVerdict(fid, field, {action:"reject", after:[aco], note:"reviewer rejected this match"});
+    if (act === "fee") {
+      const v = prompt("Monthly fee in USD for this facility (leave blank to cancel). Cite where you got it in the next box.");
+      if (!v) return;
+      const src = prompt("Source (URL or 'called the facility'):") || "reviewer-supplied";
+      addVerdict(fid, "avg_monthly_fee", {action:"correct", after:Number(v), note:`reviewer-supplied; source: ${src}`});
+    }
+    el.textContent = "✓ queued"; el.disabled = true;
+  });
+}
+
+function rowHtml(f) {
+  const dist = f.distance_mi.value === null ? unknownCell(f.distance_mi)
+    : `${f.distance_mi.value.toFixed(2)} ${srcChip(f.distance_mi)}`;
+  const beds = f.beds.value === null ? unknownCell(f.beds)
+    : `${f.beds.value} ${srcChip(f.beds)}<div class="why">${esc(f.bed_basis.value || "")}</div>`;
+  const fee = f.avg_monthly_fee.value === null
+    ? `${unknownCell(f.avg_monthly_fee)}<div class="acts"><button class="mini" data-act="fee" data-fid="${f.id}">Supply value</button></div>`
+    : `$${Number(f.avg_monthly_fee.value).toLocaleString()} ${srcChip(f.avg_monthly_fee)}<div class="why">${esc(f.avg_monthly_fee.note||"")}</div>`;
+  const mgmt = !f.management.value ? unknownCell(f.management)
+    : `<ul class="mgmt">${f.management.value.slice(0,4).map(m =>
+        `<li>${esc(m.name)}<span class="muted"> — ${esc((m.role||"").toLowerCase())}${m.pct && m.pct!=="NOT APPLICABLE" ? " "+esc(m.pct) : ""}</span></li>`).join("")}</ul>
+       ${srcChip(f.management)}${f.management.note ? `<div class="why">${esc(f.management.note)}</div>` : ""}`;
+  const svc = !f.services.value ? unknownCell(f.services)
+    : `${f.services.value.map(s => `<span class="pill">${esc(s)}</span>`).join("")} ${srcChip(f.services)}
+       <div class="why">${esc(f.services.note||"")}</div>`;
+  const acos = !f.acos.value || !f.acos.value.length ? unknownCell(f.acos)
+    : f.acos.value.map(a => `<div class="aco">
+        <div class="aco-name">${esc(a.aco_name)}</div>
+        <div class="score">${a.exact_legal_entity ? `<span class="exact">exact legal entity</span>` : `score ${a.match_score}`}
+          · via ${esc(a.match_basis||"")} “${esc(a.matched_on)}”${a.status==="confirmed" ? " · <b>confirmed</b>" : ""}</div>
+        <div class="acts">
+          <button class="mini" data-act="confirm" data-fid="${f.id}" data-field="acos">Confirm</button>
+          <button class="mini" data-act="reject" data-fid="${f.id}" data-field="acos" data-aco="${esc(a.aco_id)}">Reject</button>
+        </div></div>`).join("") + srcChip(f.acos);
+
+  return `<tr>
+    <td><div class="fname">${esc(f.name)}</div>
+        <div class="fmeta">${esc(f.address)}, ${esc(f.city)} ${esc(f.zip)}${f.cms_ccn ? " · CCN "+esc(f.cms_ccn) : ""}${f.license_id ? " · lic "+esc(f.license_id) : ""}</div>
+        ${f.legal_business_name ? `<div class="fmeta">legal entity: ${esc(f.legal_business_name)}</div>` : ""}</td>
+    <td class="num">${dist}</td><td class="num">${beds}</td><td class="num">${fee}</td>
+    <td>${mgmt}</td><td>${svc}</td><td>${acos}</td></tr>`;
+}
+
+function addVerdict(fid, field, v) {
+  VERDICTS.set(`${fid}:${field}:${v.after?.[0] ?? ""}`, {facility_id:fid, field, reviewer:"reviewer", ...v});
+  $("#vcount").textContent = VERDICTS.size;
+  $("#vbar").classList.toggle("on", VERDICTS.size > 0);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, {headers:{"content-type":"application/json"}, ...opts});
+  if (!r.ok) throw new Error((await r.text()).slice(0, 300));
+  return r.json();
+}
+
+$("#go").onclick = async () => {
+  const btn = $("#go"); btn.disabled = true;
+  $("#status").textContent = "querying CMS + state licensing registries…";
+  try {
+    const d = await api("/api/search", {method:"POST", body: JSON.stringify({
+      zip: $("#zip").value.trim(), radius_mi: Number($("#radius").value), agentic: $("#agentic").checked, review: true})});
+    RUN = d.result; ROWS = d.result.facilities; VERDICTS.clear();
+    $("#vbar").classList.remove("on");
+    renderGaps(RUN); renderSummary(RUN); renderTable();
+    $("#trace").textContent = (RUN.trace||[]).map(t =>
+      Object.entries(t).filter(([k]) => k !== "at").map(([k,v]) => `${k}=${JSON.stringify(v)}`).join("  ")).join("\n");
+    $("#status").textContent = d.paused ? "paused at review — the graph is waiting on you" : "complete";
+  } catch (e) { $("#status").textContent = "error: " + e.message; }
+  btn.disabled = false;
+};
+
+$("#submitV").onclick = async () => {
+  if (!RUN) return;
+  $("#status").textContent = "submitting verdicts…";
+  try {
+    const d = await api("/api/verdicts", {method:"POST", body: JSON.stringify({run_id: RUN.run_id, verdicts:[...VERDICTS.values()]})});
+    if (d.result) { RUN = d.result; ROWS = d.result.facilities; renderSummary(RUN); renderTable(); }
+    VERDICTS.clear(); $("#vbar").classList.remove("on");
+    $("#status").textContent = `recorded ${d.recorded} verdict(s). Now induce lessons below.`;
+    loadMeta();
+  } catch (e) { $("#status").textContent = "error: " + e.message; }
+};
+$("#clearV").onclick = () => { VERDICTS.clear(); $("#vbar").classList.remove("on"); renderTable(); };
+
+$("#induce").onclick = async () => {
+  $("#metaStatus").textContent = "inducing…";
+  try { const d = await api("/api/induce", {method:"POST"});
+    $("#metaStatus").textContent = d.created.length ? `${d.created.length} lesson(s) proposed` : "nothing generalised — no lesson proposed";
+    loadMeta();
+  } catch (e) { $("#metaStatus").textContent = "error: " + e.message; }
+};
+$("#teach").onclick = async () => {
+  const text = $("#feedback").value.trim();
+  if (!text) { $("#metaStatus").textContent = "type what you want changed first"; return; }
+  $("#metaStatus").textContent = "reading your feedback and proposing lessons…";
+  try {
+    const d = await api("/api/feedback", {method:"POST", body: JSON.stringify({feedback: text, run_id: RUN ? RUN.run_id : null})});
+    const n = (d.created || []).length;
+    $("#metaStatus").textContent = n
+      ? `${n} lesson(s) proposed — run the eval gate to see if they hold up`
+      : "nothing generalised from that — no lesson proposed";
+    if (n) $("#feedback").value = "";
+    loadMeta();
+  } catch (e) { $("#metaStatus").textContent = "error: " + e.message; }
+};
+$("#gate").onclick = async () => {
+  $("#metaStatus").textContent = "replaying the frozen set under both policies (this takes ~30s)…";
+  try { const d = await api("/api/gate", {method:"POST"}); renderGate(d); loadMeta();
+    $("#metaStatus").textContent = "gate decision: " + d.decision;
+  } catch (e) { $("#metaStatus").textContent = "error: " + e.message; }
+};
+$("#refresh").onclick = loadMeta;
+
+function renderGate(d) {
+  if (d.decision === "noop") { $("#gateBox").innerHTML = `<div class="muted">${esc(d.reasons[0])}</div>`; return; }
+  const b = d.baseline, c = d.candidate;
+  const keys = ["aco_precision","aco_recall","aco_true_positives","aco_false_positives","beds_coverage","rows_total"];
+  $("#gateBox").innerHTML = `<div style="margin-top:12px">
+    <h2>Eval gate — shadow replay of the frozen set</h2>
+    <div class="decision ${d.decision === "promote" ? "promote" : "quarantine"}">${esc(d.decision.toUpperCase())}</div>
+    <ul class="muted" style="margin:6px 0">${d.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>
+    <table style="width:auto"><thead><tr><th>metric</th><th class="num">active</th><th class="num">candidate</th></tr></thead>
+    <tbody>${keys.map(k => `<tr><td>${k}</td><td class="num">${b[k]}</td><td class="num">${c[k]}</td></tr>`).join("")}</tbody></table>
+  </div>`;
+}
+
+async function loadMeta() {
+  try {
+    const [p, ls, h] = await Promise.all([api("/api/policy"), api("/api/lessons"), api("/api/health")]);
+    $("#hdr").textContent = `policy ${h.policy_version} · aco threshold ${h.aco_match_threshold} · ${h.lessons_active} active lesson(s) · ALF connectors: ${h.states_with_alf_connector.join(",")} · agentic ${h.agentic_available ? "available" : "unavailable (BYOK)"}`;
+    $("#policyBox").innerHTML = `<div class="muted">active <code>${esc(p.active.version)}</code>${p.differs ? ` · candidate <code>${esc(p.candidate.version)}</code> (${p.proposed_lesson_ids.length} proposed, ungated)` : " · no candidate pending"}</div>`;
+    $("#lessonBox").innerHTML = ls.length ? ls.map(l => `<div class="lesson ${l.status}">
+        <span class="k">${esc(l.lesson_id)} · ${esc(l.kind)} → ${esc(l.node)} · <b>${esc(l.status)}</b></span>
+        <div>${esc(l.rationale)}</div>
+        <div class="k">payload: ${esc(JSON.stringify(l.payload))}</div></div>`).join("")
+      : `<div class="muted">No lessons yet. Correct or confirm an ACO match above, submit, then induce.</div>`;
+  } catch (e) { $("#hdr").textContent = "offline: " + e.message; }
+}
+
+loadMeta();
+</script>
+</body>
+</html>

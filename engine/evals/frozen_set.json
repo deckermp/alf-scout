@@ -1,0 +1,75 @@
+{
+  "_comment": [
+    "The frozen set. Declared BEFORE any lesson was induced, which is the only thing that",
+    "makes it a gate rather than a rationalisation.",
+    "",
+    "Every assertion here was verified by hand against the live CMS and CA registries on",
+    "2026-07-28 -- see docs/REASONING.md for how each was established. The two ACO",
+    "false-positive cases are real defects found by running the pipeline, not planted.",
+    "",
+    "target metric  : aco_precision  (we are trying to stop over-reporting affiliations)",
+    "guardrail      : aco_recall     (must not fall -- a precise matcher that finds nothing is worthless)",
+    "guardrail      : beds_coverage  (the registry spine must not regress while we tune the join)"
+  ],
+  "cases": [
+    {
+      "id": "livermore-94550",
+      "zip": "94550",
+      "radius_mi": 4.0,
+      "min_rows": 25,
+      "expect_aco": [
+        {
+          "facility_contains": "VINEYARDS",
+          "aco_name_contains": "University Healthcare Alliance",
+          "why": "CMS provider legal_business_name 'BRISTOL BAY HOLDINGS LLC' appears verbatim as an Aff_LBN in the MSSP PY2026 affiliate file. Two CMS files agreeing on a CMS-assigned string."
+        }
+      ],
+      "forbid_aco": [
+        {
+          "facility_contains": "NEW HAVEN CARE HOME",
+          "why": "Licensee is 'SOLETA HOLDINGS, INC.'; the matched affiliate is 'VIOLET HOLDINGS, LLC'. Different companies. The shared generic token 'holdings' inflated token_sort_ratio to 0.867."
+        }
+      ]
+    },
+    {
+      "id": "vallejo-94591",
+      "zip": "94591",
+      "radius_mi": 3.0,
+      "min_rows": 50,
+      "expect_aco": [
+        {
+          "facility_contains": "Springs Road Healthcare",
+          "aco_name_contains": "Sutter Medicare Direct",
+          "why": "legal_business_name '1527 SPRINGS ROAD LLC' is an exact Aff_LBN. Note the building name alone scores only 0.65 against it -- this match is only reachable via the legal-entity key."
+        },
+        {
+          "facility_contains": "Heartwood Avenue Healthcare",
+          "aco_name_contains": "Sutter Medicare Direct",
+          "why": "legal_business_name 'HEARTWOOD AVENUE LLC' is an exact Aff_LBN."
+        }
+      ],
+      "forbid_aco": []
+    },
+    {
+      "id": "thousand-oaks-91360",
+      "zip": "91360",
+      "radius_mi": 2.0,
+      "min_rows": 60,
+      "expect_aco": [],
+      "forbid_aco": [
+        {
+          "facility_contains": "SUNSHINE MANOR",
+          "why": "Matched 'SUNSHINE HEALTH FACILITIES, INC' at 1.000 under the original over-aggressive normalizer, which stripped both names to the single common token 'sunshine'."
+        },
+        {
+          "facility_contains": "OAKVIEW",
+          "why": "Matched 'ALLIED SERVICES INSTITUTE OF REHABILITATION MEDICINE' at 0.923 under partial_ratio on a 7-character key."
+        }
+      ]
+    }
+  ],
+  "guardrails": {
+    "min_beds_coverage": 0.95,
+    "min_rows_total": 140
+  }
+}

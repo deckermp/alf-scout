@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+# Runtime state only. data/geocode.json is a checked-in fixture the pipeline
+# needs at boot, so the whole directory must not be ignored.
+data/atlas.db
+data/cache/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+node_modules/
+*.png

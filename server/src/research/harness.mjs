@@ -12,7 +12,7 @@
 // at the message layer.
 import { randomUUID } from "node:crypto";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { researchMcpServer, RESEARCH_TOOL_NAMES, bindSink } from "./tools.mjs";
+import { makeResearchMcpServer, RESEARCH_TOOL_NAMES, bindSink } from "./tools.mjs";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch"];
 
@@ -147,7 +147,9 @@ export async function executeNode({ node, state, runId, emit = () => {}, hitl })
     const stream = query({
       prompt: buildPrompt(node, state),
       options: {
-        mcpServers: { research: researchMcpServer },
+        // Fresh per node turn — the enrichment nodes run concurrently and a
+        // shared instance starves all but one of them. See makeResearchMcpServer.
+        mcpServers: { research: makeResearchMcpServer() },
         allowedTools,
         maxTurns: 8,
         permissionMode: "default",
