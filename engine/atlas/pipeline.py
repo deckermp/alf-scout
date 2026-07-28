@@ -55,11 +55,11 @@ def search(
         "use_overrides": use_overrides,
         "trace": [],
     }
-    out = graph().invoke(init, cfg)
+    out = graph(pol.disabled_nodes).invoke(init, cfg)
 
     interrupts = out.get("__interrupt__") or []
     if interrupts:
-        snap = graph().get_state(cfg)
+        snap = graph(pol.disabled_nodes).get_state(cfg)
         payload = interrupts[0].value if hasattr(interrupts[0], "value") else interrupts[0]
         result = _to_result(rid, zipcode, radius_mi, pol, snap.values, agentic)
         store.save_run(result)
@@ -72,7 +72,15 @@ def search(
 
 def resume(cfg: dict, verdicts: list[dict[str, Any]]) -> SearchResult:
     """Deliver the human's verdicts to the paused graph and let it finish."""
-    out = graph().invoke(Command(resume=verdicts), cfg)
+    # Resume on the SAME topology the run paused under. The checkpoint is shared
+    # across compiled graphs (one checkpointer), so we can read the paused state
+    # to recover its policy, then resume on the graph that matches it. Resuming
+    # on the default graph would silently finish the run through a different
+    # pipeline than the one the human was reviewing.
+    paused = graph().get_state(cfg)
+    paused_policy = (paused.values or {}).get("policy") if paused else None
+    disabled = getattr(paused_policy, "disabled_nodes", ()) or ()
+    out = graph(disabled).invoke(Command(resume=verdicts), cfg)
     rid = out.get("run_id", "")
     pol = out.get("policy")
     result = _to_result(rid, out.get("zip", ""), out.get("radius_mi", 10.0), pol, out, out.get("agentic", False))

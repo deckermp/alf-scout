@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -217,39 +218,57 @@ def apply_verdicts(state: AtlasState) -> dict:
     return {"facilities": facilities, "trace": nodes._trace(state, "apply_verdicts", applied=applied, recorded=len(records))}
 
 
-def build_graph():
-    g = StateGraph(AtlasState)
-    g.add_node("resolve_zip", nodes.resolve_zip)
-    g.add_node("discover", nodes.discover)
-    g.add_node("enrich_registry", nodes.enrich_registry)
-    g.add_node("join_aco", nodes.join_aco)
-    g.add_node("enrich_agentic", enrich_agentic)
-    g.add_node("apply_overrides", nodes.apply_overrides)
-    g.add_node("review", review)
-    g.add_node("apply_verdicts", apply_verdicts)
-    g.add_node("finalize", nodes.finalize)
+# The default pipeline, in order. A `topology` lesson may drop nodes from this
+# chain; edges are then rewired around the gap, so the graph stays a valid chain
+# rather than acquiring a hole.
+PIPELINE: list[tuple[str, Any]] = [
+    ("resolve_zip", nodes.resolve_zip),
+    ("discover", nodes.discover),
+    ("enrich_registry", nodes.enrich_registry),
+    ("join_aco", nodes.join_aco),
+    ("enrich_agentic", enrich_agentic),
+    ("apply_overrides", nodes.apply_overrides),
+    ("review", review),
+    ("apply_verdicts", apply_verdicts),
+    ("finalize", nodes.finalize),
+]
 
-    g.add_edge(START, "resolve_zip")
-    g.add_edge("resolve_zip", "discover")
-    g.add_edge("discover", "enrich_registry")
-    g.add_edge("enrich_registry", "join_aco")
-    g.add_edge("join_aco", "enrich_agentic")
-    g.add_edge("enrich_agentic", "apply_overrides")
-    g.add_edge("apply_overrides", "review")
-    g.add_edge("review", "apply_verdicts")
-    g.add_edge("apply_verdicts", "finalize")
-    g.add_edge("finalize", END)
+# Nodes a lesson may never disable, whatever it asks for. Without resolve_zip and
+# discover there is no table at all; without apply_overrides the human's own
+# corrections stop being applied, which would let a topology lesson quietly
+# discard reviewer work; without finalize nothing is assembled to return.
+# The gate measures whether a change is *good*; this list bounds what a change is
+# even allowed to be.
+PROTECTED_NODES = frozenset({"resolve_zip", "discover", "apply_overrides", "finalize"})
+
+
+def build_graph(disabled_nodes: tuple[str, ...] | list[str] | None = None):
+    dropped = {n for n in (disabled_nodes or []) if n not in PROTECTED_NODES}
+    chain = [(name, fn) for name, fn in PIPELINE if name not in dropped]
+
+    g = StateGraph(AtlasState)
+    for name, fn in chain:
+        g.add_node(name, fn)
+
+    prev = START
+    for name, _ in chain:
+        g.add_edge(prev, name)
+        prev = name
+    g.add_edge(prev, END)
     return g.compile(checkpointer=_CHECKPOINTER)
 
 
-_GRAPH = None
+# Cache per topology, not globally: a candidate policy that disables a node must
+# get its own compiled graph, or the gate would shadow-replay the active graph
+# and report that the change did nothing.
+_GRAPHS: dict[tuple[str, ...], Any] = {}
 
 
-def graph():
-    global _GRAPH
-    if _GRAPH is None:
-        _GRAPH = build_graph()
-    return _GRAPH
+def graph(disabled_nodes: tuple[str, ...] | list[str] | None = None):
+    key = tuple(sorted(disabled_nodes or ()))
+    if key not in _GRAPHS:
+        _GRAPHS[key] = build_graph(key)
+    return _GRAPHS[key]
 
 
 def new_thread() -> tuple[str, dict]:

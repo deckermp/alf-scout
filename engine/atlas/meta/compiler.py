@@ -34,6 +34,7 @@ def compile_policy(lesson_rows: list[dict] | None = None, base: Policy | None = 
     rules = list(p.service_rules)
     prefs = {k: list(v) for k, v in p.source_pref.items()}
     addenda = list(p.prompt_addenda)
+    disabled = list(p.disabled_nodes)
     threshold = p.aco_match_threshold
     min_key_tokens = p.aco_min_key_tokens
     min_key_chars = p.aco_min_key_chars
@@ -67,6 +68,19 @@ def compile_policy(lesson_rows: list[dict] | None = None, base: Policy | None = 
                 text = payload.get("text", "").strip()
                 if text and text not in addenda:
                     addenda.append(text)
+            elif kind == "topology":
+                # The seventh kind: a lesson that restructures the graph rather than
+                # retuning it. Ops are order-sensitive and last-write-wins, same as
+                # every other kind, so "disable then re-enable" resolves to enabled.
+                for op in payload.get("ops", []):
+                    name = op.get("node")
+                    if not name:
+                        continue
+                    if op.get("op") == "disable_node":
+                        if name not in disabled:
+                            disabled.append(name)
+                    elif op.get("op") == "enable_node":
+                        disabled = [n for n in disabled if n != name]
             else:
                 continue
         except (KeyError, TypeError, ValueError):
@@ -83,6 +97,7 @@ def compile_policy(lesson_rows: list[dict] | None = None, base: Policy | None = 
         min_capacity=min_capacity,
         source_pref=prefs,
         prompt_addenda=addenda,
+        disabled_nodes=disabled,
         lesson_ids=applied,
         notes=f"{len(applied)} lesson(s) applied",
     ).stamped()

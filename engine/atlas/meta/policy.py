@@ -34,6 +34,11 @@ class Policy(BaseModel):
     source_pref: dict[str, list[str]] = Field(default_factory=dict)
     # enrich_agentic
     prompt_addenda: list[str] = Field(default_factory=list)
+    # topology -- which optional nodes run. The other policy fields retune the
+    # pipeline; this one restructures it. Empty means the full default graph.
+    # Compiled from `topology` lessons; enforced in graph/build.py, which refuses
+    # to drop a PROTECTED node no matter what a lesson asks for.
+    disabled_nodes: list[str] = Field(default_factory=list)
     # bookkeeping
     lesson_ids: list[str] = Field(default_factory=list)
     notes: str = ""
